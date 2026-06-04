@@ -592,6 +592,20 @@ class PlayerProvider extends ChangeNotifier {
         notifyListeners();
       }
     });
+    _queueSub?.cancel();
+    _queueSub = handler.queue.listen((items) {
+      final newTracks = items.map((item) => Track(
+        id: item.id,
+        title: item.title,
+        author: item.artist,
+        thumbnailUrl: item.artUri?.toString(),
+        duration: item.duration ?? Duration.zero,
+      )).toList();
+      if (!_areQueuesEqual(_queue, newTracks)) {
+        _queue = newTracks;
+        notifyListeners();
+      }
+    });
     _syncQueueToHandler();
     final mode = switch (_repeatMode) {
       repeat.PlaybackRepeatMode.none => AudioServiceRepeatMode.none,

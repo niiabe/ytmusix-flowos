@@ -60,6 +60,12 @@ class MusicAudioHandler extends BaseAudioHandler {
   bool _isHandlingCompletion = false;
   bool _fetchingRecommendations = false;
 
+  @override
+  Future<void> setRepeatMode(AudioServiceRepeatMode repeatMode) async {
+    _repeatMode = repeatMode;
+    playbackState.add(playbackState.value.copyWith(repeatMode: repeatMode));
+  }
+
   void setRepository(AudioRepository repository) {
     _audioRepository = repository;
   }

@@ -8,9 +8,6 @@
 - Implemented seamless position handoff and playback synchronization between audio and video modes.
 - Ensured video player auto-pauses background audio to prevent double playback sound.
 - Added auto-advance navigation progression when video playback completes.
-- Fixed bottom layout overflow on the Now Playing FAB widget.
-- Corrected repeat and shuffle control integration on the Now Playing screen.
-- Resolved seekbar duration filling issues.
 
 ## 1.4.1
 

@@ -46,6 +46,17 @@ void main() {
     expect(player.queue.length, 3);
     expect(player.queue[0], track2); // current track moved to first position
     expect(player.currentIndex, 0);
+    expect(repository.playedTrackIds, ['next', 'seed']);
+    expect(repository.requestedQualities, ['medium', 'medium', 'medium']);
+    expect(repository.recommendationCallCount, 0);
+  });
+
+  test('no repeat advances to the next queued track', () async {
+    player.setQueue([seed, nextTrack], startIndex: 0);
+    await player.playTrack(seed, quality: AudioQuality.high);
+
+    repository.completeCurrentTrack();
+    await pumpEvents();
 
     player.toggleShuffle();
     expect(player.shuffleMode, false);

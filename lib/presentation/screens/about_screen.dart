@@ -116,7 +116,7 @@ class _ChangelogSection extends StatelessWidget {
   static const _items = [
     (
       '1.4.2',
-      'Redesigned the search screen with category-specific parallel searches, standard track tiles, cached network images, and pill-shaped chips. Implemented seamless progress switching between audio and video modes with automatic background audio pausing and video end-progression. Fixed bottom layout overflow on the Now Playing FAB, corrected repeat and shuffle controls, and resolved seekbar duration filling issues.',
+      'Redesigned the search screen with category-specific parallel searches, standard track tiles, cached network images, and pill-shaped chips. Implemented seamless progress switching between audio and video modes with automatic background audio pausing and video end-progression.',
     ),
     (
       '1.4.1',
