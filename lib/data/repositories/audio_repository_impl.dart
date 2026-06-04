@@ -113,6 +113,12 @@ class AudioRepositoryImpl implements AudioRepository {
   bool get currentTrackCompleted => _handler.currentTrackCompleted;
 
   @override
+  Future<List<Track>> getRelatedVideos(Track track) async {
+    final models = await remoteDataSource.getRelatedVideos(track.id);
+    return models.map((m) => m.toEntity()).toList();
+  }
+
+  @override
   Stream<void> get onSkipNextRequested => _handler.skipNextRequested.stream;
 
   @override

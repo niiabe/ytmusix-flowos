@@ -10,6 +10,7 @@ A Flutter mobile app that streams audio from public YouTube playlists, single vi
 - **Smooth seek and buffer UI** — optimistic seeking plus buffered progress in the full player waveform and mini player
 - **Play/pause state indicators** — toggle icon reflects playback status on home screen, playlist screen, player bar, and expanded player
 - **Queue management** — play, pause, skip, previous, shuffle, repeat, auto-advance on track completion
+- **Autoplay** — when the queue ends, seamlessly fetches related YouTube tracks and keeps playing (designed by [BENJAMINDARKO](https://github.com/BENJAMINDARKO))
 - **Sleep timer** — 15m/30m/60m/custom timer to auto-stop playback
 - **Lockscreen & notification controls** — Android media notification with play/pause/skip buttons
 
@@ -213,6 +214,10 @@ _(No tests currently — test directory removed during refactoring.)_
 - **iOS Swift Package Manager notice** — Flutter currently warns that `flutter_secure_storage` does not support Swift Package Manager for iOS yet. This is a future-warning, not a current build blocker.
 - **Android Kotlin Gradle Plugin notice** — Flutter currently warns that app/plugin Kotlin Gradle Plugin usage should migrate to Built-in Kotlin for future Flutter versions. This is a future-warning, not a current build blocker.
 - **Samsung GPU `BufferQueue` timeout** — harmless Adreno driver spam in logcat on Exynos devices; does not affect playback.
+
+## Design Docs
+
+- [`autoplay-explained-simple.md`](autoplay-explained-simple.md) — autoplay behavior spec designed by [BENJAMINDARKO](https://github.com/BENJAMINDARKO)
 
 ## Roadmap
 

@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:developer' as dev;
-import 'package:dart_ytmusic_api/dart_ytmusic_api.dart' as ytmusic;
 import 'package:youtube_explode_dart/youtube_explode_dart.dart'
     hide Playlist, Video;
 import 'package:http/http.dart' as http;
@@ -15,10 +14,9 @@ class YoutubeRemoteDataSource {
 
   final AuthService _authService;
   late final YoutubeExplode _yt;
-  late final ytmusic.YTMusic _ytMusic;
 
   YoutubeRemoteDataSource({AuthService? authService})
-    : _authService = authService ?? AuthService();
+      : _authService = authService ?? AuthService();
 
   Future<void> init() async {
     final cookies = await _authService.getCookies();
@@ -61,10 +59,8 @@ class YoutubeRemoteDataSource {
                 .toList()
                 .timeout(_timeout);
           } catch (e) {
-            dev.log(
-              'Playlist videos fetch failed for $playlistId (attempt $attempt): $e',
-              name: 'YoutubeRemoteDataSource',
-            );
+            dev.log('Playlist videos fetch failed for $playlistId (attempt $attempt): $e',
+                name: 'YoutubeRemoteDataSource');
             return <dynamic>[];
           }
         }();
@@ -119,9 +115,7 @@ class YoutubeRemoteDataSource {
           );
         }
 
-        final thumbnailUrl = tracks.isNotEmpty
-            ? tracks.first.thumbnailUrl
-            : null;
+        final thumbnailUrl = tracks.isNotEmpty ? tracks.first.thumbnailUrl : null;
 
         return PlaylistModel(
           id: playlistId,
@@ -132,20 +126,16 @@ class YoutubeRemoteDataSource {
           tracks: tracks,
         );
       } on TimeoutException {
-        dev.log(
-          'Attempt $attempt timed out for playlist $playlistId',
-          name: 'YoutubeRemoteDataSource',
-        );
+        dev.log('Attempt $attempt timed out for playlist $playlistId',
+            name: 'YoutubeRemoteDataSource');
         if (attempt >= 3 || stopwatch.elapsed > const Duration(seconds: 45)) {
           rethrow;
         }
         await Future.delayed(Duration(seconds: 2 * attempt));
       } on Exception catch (e) {
         final msg = e.toString();
-        dev.log(
-          'Playlist fetch attempt $attempt failed for $playlistId: $msg',
-          name: 'YoutubeRemoteDataSource',
-        );
+        dev.log('Playlist fetch attempt $attempt failed for $playlistId: $msg',
+            name: 'YoutubeRemoteDataSource');
         if (attempt >= 3 || stopwatch.elapsed > const Duration(seconds: 45)) {
           rethrow;
         }
@@ -363,11 +353,9 @@ class YoutubeRemoteDataSource {
           throw Exception('No audio streams available for video $videoId');
         }
         var candidates = audioStreams
-            .where(
-              (s) =>
-                  s.container == StreamContainer.mp4 ||
-                  s.container == StreamContainer.webM,
-            )
+            .where((s) =>
+                s.container == StreamContainer.mp4 ||
+                s.container == StreamContainer.webM)
             .toList();
         if (candidates.isEmpty) {
           candidates = audioStreams;
@@ -376,10 +364,8 @@ class YoutubeRemoteDataSource {
         return _addGeoBypassParams(bestAudio.url.toString());
       } on TimeoutException {
         attempt++;
-        dev.log(
-          'Attempt $attempt timed out for video $videoId',
-          name: 'YoutubeRemoteDataSource',
-        );
+        dev.log('Attempt $attempt timed out for video $videoId',
+            name: 'YoutubeRemoteDataSource');
         if (attempt >= 3 || stopwatch.elapsed > const Duration(seconds: 45)) {
           rethrow;
         }
@@ -388,33 +374,24 @@ class YoutubeRemoteDataSource {
         attempt++;
         final msg = e.toString();
         if (attempt >= 3 || stopwatch.elapsed > const Duration(seconds: 45)) {
-          dev.log(
-            'All $attempt attempts failed for video $videoId: $msg',
-            name: 'YoutubeRemoteDataSource',
-          );
+          dev.log('All $attempt attempts failed for video $videoId: $msg',
+              name: 'YoutubeRemoteDataSource');
           rethrow;
         }
         if (msg.contains('requestLimit') || msg.contains('429')) {
-          dev.log(
-            'Rate limited on attempt $attempt for video $videoId',
-            name: 'YoutubeRemoteDataSource',
-          );
+          dev.log('Rate limited on attempt $attempt for video $videoId',
+              name: 'YoutubeRemoteDataSource');
           await Future.delayed(Duration(seconds: 2 * attempt));
         } else {
-          dev.log(
-            'Non-retryable error on attempt $attempt for video $videoId: $msg',
-            name: 'YoutubeRemoteDataSource',
-          );
+          dev.log('Non-retryable error on attempt $attempt for video $videoId: $msg',
+              name: 'YoutubeRemoteDataSource');
           rethrow;
         }
       }
     }
   }
 
-  AudioStreamInfo _selectByQuality(
-    List<AudioStreamInfo> streams,
-    String quality,
-  ) {
+  AudioStreamInfo _selectByQuality(List<AudioStreamInfo> streams, String quality) {
     final sorted = List<AudioStreamInfo>.from(streams)
       ..sort((a, b) => a.bitrate.compareTo(b.bitrate));
     switch (quality) {
@@ -428,32 +405,11 @@ class YoutubeRemoteDataSource {
     }
   }
 
-  Future<List<TrackModel>> search(String query) async {
-    try {
-      final songs = await _ytMusic.searchSongs(query).timeout(_timeout);
-      final videos = await _ytMusic.searchVideos(query).timeout(_timeout);
-      final seen = <String>{};
-      final tracks = <TrackModel>[];
-
-      for (final song in songs) {
-        if (song.videoId.isEmpty || !seen.add(song.videoId)) continue;
-        tracks.add(_trackFromSong(song, tracks.length));
-      }
-
-      for (final video in videos) {
-        if (video.videoId.isEmpty || !seen.add(video.videoId)) continue;
-        tracks.add(_trackFromVideo(video, tracks.length));
-      }
-
-      if (tracks.isNotEmpty) return tracks;
-    } catch (e) {
-      dev.log(
-        'YouTube Music search failed for "$query", using YouTube fallback: $e',
-        name: 'YoutubeRemoteDataSource',
-      );
-    }
-
-    final results = await _yt.search.search(query);
+  Future<List<TrackModel>> getRelatedVideos(String videoId,
+      {int maxResults = 20}) async {
+    final video = await _yt.videos.get(videoId);
+    final related = await _yt.videos.getRelatedVideos(video);
+    final videos = related?.take(maxResults).toList() ?? [];
     final tracks = <TrackModel>[];
     for (var i = 0; i < results.length; i++) {
       final video = results[i];

@@ -8,9 +8,7 @@ import 'data/repositories/audio_repository_impl.dart';
 import 'data/repositories/playlist_repository_impl.dart';
 import 'service/auth_service.dart';
 import 'service/audio_handler.dart';
-import 'service/chart_service.dart';
 import 'service/download_service.dart';
-import 'presentation/providers/chart_provider.dart';
 import 'presentation/providers/download_provider.dart';
 import 'presentation/providers/settings_provider.dart';
 
@@ -19,17 +17,15 @@ Future<void> main() async {
 
   try {
     final session = await AudioSession.instance;
-    await session.configure(
-      const AudioSessionConfiguration(
-        avAudioSessionCategory: AVAudioSessionCategory.playback,
-        androidAudioAttributes: AndroidAudioAttributes(
-          contentType: AndroidAudioContentType.music,
-          usage: AndroidAudioUsage.media,
-        ),
-        androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
-        androidWillPauseWhenDucked: false,
+    await session.configure(const AudioSessionConfiguration(
+      avAudioSessionCategory: AVAudioSessionCategory.playback,
+      androidAudioAttributes: AndroidAudioAttributes(
+        contentType: AndroidAudioContentType.music,
+        usage: AndroidAudioUsage.media,
       ),
-    );
+      androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
+      androidWillPauseWhenDucked: false,
+    ));
 
     final authService = AuthService();
     final remoteDataSource = YoutubeRemoteDataSource(authService: authService);
@@ -66,18 +62,14 @@ Future<void> main() async {
     );
     final downloadProvider = DownloadProvider(downloadService);
     await downloadProvider.init();
-    final chartProvider = ChartProvider(ChartService());
 
-    runApp(
-      YTMusixApp(
-        playlistRepository: playlistRepository,
-        audioRepository: audioRepository,
-        downloadProvider: downloadProvider,
-        chartProvider: chartProvider,
-        settingsProvider: settingsProvider,
-        audioHandler: audioHandler,
-      ),
-    );
+    runApp(YTMusixApp(
+      playlistRepository: playlistRepository,
+      audioRepository: audioRepository,
+      downloadProvider: downloadProvider,
+      settingsProvider: settingsProvider,
+      audioHandler: audioHandler,
+    ));
   } catch (e) {
     runApp(
       MaterialApp(

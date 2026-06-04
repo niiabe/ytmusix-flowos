@@ -1,0 +1,33 @@
+name: Build & Publish Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.12'
+
+      - name: Patch youtube_explode_dart
+        run: |
+          FILE="$HOME/.pub-cache/hosted/pub.dev/youtube_explode_dart-3.1.0/lib/src/reverse_engineering/youtube_http_client.dart"
+          sed -i "s/'clientName': \"ANDROID\"/'clientName': \"WEB\"/" "$FILE"
+          sed -i "s/'clientVersion': \".*\"/'clientVersion': \"2.20250601.00.00\"/" "$FILE"
+
+      - run: flutter pub get
+
+      - run: flutter build apk --release
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/app/outputs/flutter-apk/app-release.apk
+          generate_release_notes: true

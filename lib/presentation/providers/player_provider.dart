@@ -10,6 +10,8 @@ import '../../domain/repositories/audio_repository.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
 import '../../service/audio_handler.dart';
+import 'download_provider.dart';
+import 'settings_provider.dart';
 
 // ---------------------------------------------------------------------------
 // URL cache — maps trackId -> resolved stream URL so the next-track load
@@ -18,8 +20,14 @@ import '../../service/audio_handler.dart';
 
 class PlayerProvider extends ChangeNotifier {
   final AudioRepository _audioRepository;
+  final DownloadProvider? _downloadProvider;
+  final SettingsProvider? _settingsProvider;
 
-  PlayerProvider(this._audioRepository) {
+  PlayerProvider(
+    this._audioRepository, {
+    this._downloadProvider,
+    this._settingsProvider,
+  }) {
     _skipNextSubscription = _audioRepository.onSkipNextRequested.listen((_) {
       next();
     });
@@ -51,7 +59,7 @@ class PlayerProvider extends ChangeNotifier {
   bool _isPlaying = false;
   bool _isLoading = false;
   bool _shuffleMode = false;
-  AudioQuality _lastPlaybackQuality = AudioQuality.low;
+  bool _isAutoplaying = false;
   repeat.PlaybackRepeatMode _repeatMode = repeat.PlaybackRepeatMode.none;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
@@ -179,6 +187,7 @@ class PlayerProvider extends ChangeNotifier {
   int get currentIndex => _currentIndex;
   bool get isPlaying => _isPlaying;
   bool get isLoading => _isLoading;
+  bool get isAutoplaying => _isAutoplaying;
   bool get shuffleMode => _shuffleMode;
   repeat.PlaybackRepeatMode get repeatMode => _repeatMode;
   Duration get position => _position;
@@ -279,7 +288,6 @@ class PlayerProvider extends ChangeNotifier {
     Track track, {
     AudioQuality quality = AudioQuality.low,
   }) async {
-    _lastPlaybackQuality = quality;
     _isLoading = true;
     _error = null;
     _currentTrack = track;
@@ -352,14 +360,10 @@ class PlayerProvider extends ChangeNotifier {
   Future<String> getVideoUrl(
     Track track, {
     AudioQuality quality = AudioQuality.low,
-  }) {
-    return _audioRepository.getVideoUrl(track, quality: quality.name);
-  }
-
-  Future<void> playFromQueue(int index, {AudioQuality? quality}) async {
+  }) async {
     if (index < 0 || index >= _queue.length) return;
     _currentIndex = index;
-    await playTrack(_queue[index], quality: quality ?? _lastPlaybackQuality);
+    await playTrack(_queue[index], quality: quality);
   }
 
   Future<void> togglePlayPause() async {
@@ -397,13 +401,15 @@ class PlayerProvider extends ChangeNotifier {
     } else if (_repeatMode == repeat.PlaybackRepeatMode.all &&
         _queue.isNotEmpty) {
       await playFromQueue(0);
+    } else if (_currentTrack != null) {
+      await _fetchAutoplayRecommendations();
     }
   }
 
   Future<void> previous() async {
     if (_currentIndex > 0) {
       _currentIndex--;
-      await playTrack(_queue[_currentIndex], quality: _lastPlaybackQuality);
+      await playTrack(_queue[_currentIndex]);
     } else {
       await seekTo(Duration.zero);
     }
@@ -553,8 +559,36 @@ class PlayerProvider extends ChangeNotifier {
     _audioHandler = handler;
     _playbackStateSub?.cancel();
     _playbackStateSub = handler.playbackState.listen((state) {
+      bool changed = false;
       if (_isPlaying != state.playing) {
         _isPlaying = state.playing;
+        changed = true;
+      }
+      final newMode = switch (state.repeatMode) {
+        AudioServiceRepeatMode.none => repeat.PlaybackRepeatMode.none,
+        AudioServiceRepeatMode.one => repeat.PlaybackRepeatMode.one,
+        AudioServiceRepeatMode.all => repeat.PlaybackRepeatMode.all,
+        _ => repeat.PlaybackRepeatMode.none,
+      };
+      if (_repeatMode != newMode) {
+        _repeatMode = newMode;
+        changed = true;
+      }
+      if (changed) {
+        notifyListeners();
+      }
+    });
+    _queueSub?.cancel();
+    _queueSub = handler.queue.listen((items) {
+      final newTracks = items.map((item) => Track(
+        id: item.id,
+        title: item.title,
+        author: item.artist,
+        thumbnailUrl: item.artUri?.toString(),
+        duration: item.duration ?? Duration.zero,
+      )).toList();
+      if (!_areQueuesEqual(_queue, newTracks)) {
+        _queue = newTracks;
         notifyListeners();
       }
     });
@@ -573,6 +607,12 @@ class PlayerProvider extends ChangeNotifier {
       }
     });
     _syncQueueToHandler();
+    final mode = switch (_repeatMode) {
+      repeat.PlaybackRepeatMode.none => AudioServiceRepeatMode.none,
+      repeat.PlaybackRepeatMode.one => AudioServiceRepeatMode.one,
+      repeat.PlaybackRepeatMode.all => AudioServiceRepeatMode.all,
+    };
+    _audioHandler!.setRepeatMode(mode);
   }
 
   MediaItem _trackToMediaItem(Track track) {

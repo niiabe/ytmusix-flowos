@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'core/theme/app_theme.dart';
 import 'domain/repositories/audio_repository.dart';
 import 'domain/repositories/playlist_repository.dart';
-import 'presentation/providers/chart_provider.dart';
 import 'presentation/providers/player_provider.dart';
 import 'presentation/providers/playlist_provider.dart';
 import 'presentation/providers/download_provider.dart';
@@ -15,7 +14,6 @@ class YTMusixApp extends StatelessWidget {
   final PlaylistRepository playlistRepository;
   final AudioRepository audioRepository;
   final DownloadProvider downloadProvider;
-  final ChartProvider chartProvider;
   final SettingsProvider settingsProvider;
   final MusicAudioHandler audioHandler;
 
@@ -24,7 +22,6 @@ class YTMusixApp extends StatelessWidget {
     required this.playlistRepository,
     required this.audioRepository,
     required this.downloadProvider,
-    required this.chartProvider,
     required this.settingsProvider,
     required this.audioHandler,
   });
@@ -34,15 +31,19 @@ class YTMusixApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: settingsProvider),
-        ChangeNotifierProvider.value(value: chartProvider),
         ChangeNotifierProvider(
           create: (_) => PlaylistProvider(playlistRepository),
         ),
         ChangeNotifierProvider(
-          create: (_) =>
-              PlayerProvider(audioRepository)..setAudioHandler(audioHandler),
+          create: (_) => PlayerProvider(
+            audioRepository,
+            downloadProvider: downloadProvider,
+            settingsProvider: settingsProvider,
+          )..setAudioHandler(audioHandler),
         ),
-        ChangeNotifierProvider.value(value: downloadProvider),
+        ChangeNotifierProvider.value(
+          value: downloadProvider,
+        ),
       ],
       child: MaterialApp(
         title: 'YTMusix',

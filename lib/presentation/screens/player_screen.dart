@@ -1,12 +1,9 @@
-import 'dart:async';
 import 'dart:ui';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:video_player/video_player.dart';
 import '../../core/constants/repeat_mode.dart' as repeat;
 import '../../core/constants/audio_quality.dart';
 import '../../core/utils/format_duration.dart';
@@ -20,9 +17,7 @@ import '../widgets/queue_sheet.dart';
 import 'album_screen.dart';
 import 'artist_screen.dart';
 
-enum _PlaybackMode { audio, video }
-
-class PlayerScreen extends StatefulWidget {
+class PlayerScreen extends StatelessWidget {
   const PlayerScreen({super.key});
 
   @override
@@ -104,6 +99,190 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       builder: (context, constraints) {
                         final isAudio = _playbackMode == _PlaybackMode.audio;
                         final compact = constraints.maxHeight < 760;
+                        final isWide = constraints.maxWidth > 720;
+                        if (isWide) {
+                          return Padding(
+                            padding: const EdgeInsets.fromLTRB(36, 24, 36, 24),
+                            child: Column(
+                              children: [
+                                _buildPlayerHeader(context, player, track),
+                                Expanded(
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.center,
+                                    children: [
+                                      Expanded(
+                                        flex: 5,
+                                        child: Center(
+                                          child: ConstrainedBox(
+                                            constraints: const BoxConstraints(
+                                              maxWidth: 440,
+                                              maxHeight: 440,
+                                            ),
+                                            child: AnimatedSwitcher(
+                                              duration: const Duration(milliseconds: 220),
+                                              child: isAudio
+                                                  ? _Artwork(
+                                                      key: const ValueKey('audio-artwork'),
+                                                      imageUrl: track.thumbnailUrl,
+                                                    )
+                                                  : _InlineVideoPlayer(
+                                                      key: ValueKey('video-${track.id}'),
+                                                      track: track,
+                                                    ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 48),
+                                      Expanded(
+                                        flex: 5,
+                                        child: Center(
+                                          child: ConstrainedBox(
+                                            constraints: const BoxConstraints(
+                                              maxWidth: 480,
+                                            ),
+                                            child: Column(
+                                              mainAxisAlignment: MainAxisAlignment.center,
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Row(
+                                                  children: [
+                                                    Expanded(
+                                                      child: Column(
+                                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                                        children: [
+                                                          Text(
+                                                            track.title,
+                                                            maxLines: 2,
+                                                            overflow: TextOverflow.ellipsis,
+                                                            style: const TextStyle(
+                                                              fontSize: 26,
+                                                              fontWeight: FontWeight.w900,
+                                                            ),
+                                                          ),
+                                                          const SizedBox(height: 8),
+                                                          Text(
+                                                            track.author ?? '',
+                                                            maxLines: 1,
+                                                            overflow: TextOverflow.ellipsis,
+                                                            style: const TextStyle(
+                                                              color: Colors.white54,
+                                                              fontSize: 13,
+                                                              fontWeight: FontWeight.w700,
+                                                              letterSpacing: 1.2,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                    IconButton(
+                                                      icon: Icon(
+                                                        Icons.compare_arrows_rounded,
+                                                        color: settings.crossfadeEnabled
+                                                            ? Colors.greenAccent
+                                                            : Colors.white54,
+                                                      ),
+                                                      tooltip: 'Crossfade (7s)',
+                                                      onPressed: () {
+                                                        final nextVal = !settings.crossfadeEnabled;
+                                                        settings.setCrossfadeEnabled(nextVal);
+                                                        player.setCrossfadeEnabled(nextVal);
+                                                      },
+                                                    ),
+                                                    IconButton(
+                                                      icon: Icon(
+                                                        isFav
+                                                            ? Icons.favorite_rounded
+                                                            : Icons.favorite_border_rounded,
+                                                        color: Colors.white,
+                                                      ),
+                                                      tooltip: isFav
+                                                          ? 'Remove from favorites'
+                                                          : 'Add to favorites',
+                                                      onPressed: () => playlistProvider.toggleFavorite(track),
+                                                    ),
+                                                  ],
+                                                ),
+                                                if (isAudio) ...[
+                                                  const SizedBox(height: 36),
+                                                  _SeekWaveform(
+                                                    position: player.position,
+                                                    duration: player.duration,
+                                                    bufferedPosition: player.bufferedPosition,
+                                                    onSeek: player.seekTo,
+                                                  ),
+                                                  const SizedBox(height: 28),
+                                                  Row(
+                                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                    children: [
+                                                      _ControlButton(
+                                                        icon: Icons.shuffle_rounded,
+                                                        active: player.shuffleMode,
+                                                        onPressed: player.toggleShuffle,
+                                                      ),
+                                                      _ControlButton(
+                                                        icon: Icons.skip_previous_rounded,
+                                                        onPressed: player.previous,
+                                                      ),
+                                                      player.isLoading
+                                                          ? const SizedBox(
+                                                              width: 62,
+                                                              height: 62,
+                                                              child: CircularProgressIndicator(
+                                                                strokeWidth: 2,
+                                                              ),
+                                                            )
+                                                          : SizedBox(
+                                                              width: 64,
+                                                              height: 64,
+                                                              child: IconButton(
+                                                                style: IconButton.styleFrom(
+                                                                  backgroundColor: Colors.white,
+                                                                  foregroundColor: Colors.black,
+                                                                  shape: const CircleBorder(),
+                                                                ),
+                                                                icon: Icon(
+                                                                  player.isPlaying
+                                                                      ? Icons.pause_rounded
+                                                                      : Icons.play_arrow_rounded,
+                                                                  size: 34,
+                                                                ),
+                                                                onPressed: player.togglePlayPause,
+                                                              ),
+                                                            ),
+                                                      _ControlButton(
+                                                        icon: Icons.skip_next_rounded,
+                                                        onPressed: player.currentIndex + 1 < player.queue.length
+                                                            ? () => player.next()
+                                                            : null,
+                                                      ),
+                                                      _ControlButton(
+                                                        icon: _repeatIconData(player.repeatMode),
+                                                        active: player.repeatMode != repeat.PlaybackRepeatMode.none,
+                                                        onPressed: player.cycleRepeatMode,
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
+                                                const SizedBox(height: 36),
+                                                _buildQuickActions(context, player, track),
+                                                if (player.error != null) ...[
+                                                  const SizedBox(height: 16),
+                                                  _PlayerErrorBanner(message: player.error!),
+                                                ],
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+
                         return SingleChildScrollView(
                           physics: const BouncingScrollPhysics(),
                           child: ConstrainedBox(
@@ -263,9 +442,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                           icon: Icons.skip_next_rounded,
                                           onPressed:
                                               player.currentIndex + 1 <
-                                                  player.queue.length
-                                              ? () => player.next()
-                                              : null,
+                                                      player.queue.length
+                                                  ? () => player.next()
+                                                  : null,
                                         ),
                                         _ControlButton(
                                           icon: _repeatIconData(
@@ -302,13 +481,104 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     const SizedBox(height: 12),
                                     _PlayerErrorBanner(message: player.error!),
                                   ],
-                                  SizedBox(height: compact ? 8 : 18),
-                                ],
+                                ),
                               ),
-                            ),
+                              IconButton(
+                                icon: Icon(
+                                  isFav
+                                      ? Icons.favorite_rounded
+                                      : Icons.favorite_border_rounded,
+                                  color: isFav
+                                      ? const Color(0xFFFF7FA4)
+                                      : Colors.white,
+                                ),
+                                tooltip: isFav
+                                    ? 'Remove from favorites'
+                                    : 'Add to favorites',
+                                onPressed: () =>
+                                    playlistProvider.toggleFavorite(track),
+                              ),
+                            ],
                           ),
-                        );
-                      },
+                          const SizedBox(height: 28),
+                          _SeekWaveform(
+                            position: player.position,
+                            duration: player.duration,
+                            bufferedPosition: player.bufferedPosition,
+                            onSeek: player.seekTo,
+                          ),
+                          const SizedBox(height: 28),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              _ControlButton(
+                                icon: Icons.shuffle_rounded,
+                                active: player.shuffleMode,
+                                onPressed: player.toggleShuffle,
+                              ),
+                              _ControlButton(
+                                icon: Icons.skip_previous_rounded,
+                                onPressed: player.previous,
+                              ),
+                              player.isLoading
+                                  ? const SizedBox(
+                                      width: 62,
+                                      height: 62,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : SizedBox(
+                                      width: 64,
+                                      height: 64,
+                                      child: IconButton(
+                                        style: IconButton.styleFrom(
+                                          backgroundColor: Colors.white,
+                                          foregroundColor: Colors.black,
+                                          shape: const CircleBorder(),
+                                        ),
+                                        icon: Icon(
+                                          player.isPlaying
+                                              ? Icons.pause_rounded
+                                              : Icons.play_arrow_rounded,
+                                          size: 34,
+                                        ),
+                                        onPressed: player.togglePlayPause,
+                                      ),
+                                    ),
+                              _ControlButton(
+                                icon: Icons.skip_next_rounded,
+                                onPressed:
+                                    player.currentIndex + 1 <
+                                        player.queue.length
+                                    ? () => player.next()
+                                    : null,
+                              ),
+                              _ControlButton(
+                                icon: _repeatIconData(player.repeatMode),
+                                active:
+                                    player.repeatMode !=
+                                    repeat.PlaybackRepeatMode.none,
+                                onPressed: player.cycleRepeatMode,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 28),
+                          _buildLyricsButton(context, track),
+                          if (player.error != null) ...[
+                            const SizedBox(height: 18),
+                            Text(
+                              player.error!,
+                              style: const TextStyle(
+                                color: Colors.redAccent,
+                                fontSize: 12,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                          const Spacer(),
+                        ],
+                      ),
                     ),
                   ),
                 ],
@@ -318,11 +588,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  Widget _buildPlayerHeader(
-    BuildContext context,
-    PlayerProvider player,
-    Track track,
-  ) {
+  static const _timeStyle = TextStyle(
+    color: Colors.white70,
+    fontSize: 11,
+    fontWeight: FontWeight.w600,
+  );
+
+  Widget _buildPlayerHeader(BuildContext context, PlayerProvider player) {
     return Row(
       children: [
         _HeaderButton(
@@ -330,13 +602,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
           tooltip: 'Back',
           onPressed: () => Navigator.pop(context),
         ),
-        Expanded(
-          child: Center(
-            child: _PlaybackModeTabs(
-              mode: _playbackMode,
-              onAudioTap: () => _selectAudioMode(player),
-              onVideoTap: () => _selectVideoMode(player),
-            ),
+        const Expanded(
+          child: Text(
+            'Now Playing',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
           ),
         ),
         _HeaderButton(
@@ -654,16 +924,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _showQueueSheet(context);
         },
       ),
-      if (track != null)
-        _MoreAction(
-          icon: Icons.playlist_add_rounded,
-          title: 'Save to playlist',
-          subtitle: 'Save this track or current queue',
-          onTap: () {
-            Navigator.pop(context);
-            _showSaveSheet(context, player, track);
-          },
-        ),
       if (track != null)
         _MoreAction(
           icon: isDownloaded
@@ -1072,53 +1332,50 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final options = [15, 30, 60];
     showModalBottomSheet(
       context: context,
-      builder: (ctx) => Material(
-        color: Theme.of(context).scaffoldBackgroundColor,
-        child: SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text(
-                  'Sleep Timer',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Sleep Timer',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
-              if (player.isSleepTimerActive)
-                ListTile(
-                  leading: const Icon(Icons.timer_off, color: Colors.red),
-                  title: const Text('Turn off timer'),
-                  onTap: () {
-                    player.cancelSleepTimer();
-                    Navigator.pop(ctx);
-                  },
-                ),
-              ...options.map(
-                (minutes) => ListTile(
-                  leading: const Icon(Icons.timer),
-                  title: Text(
-                    minutes >= 60
-                        ? '${minutes ~/ 60}h ${minutes % 60}m'
-                        : '${minutes}m',
-                  ),
-                  onTap: () {
-                    player.startSleepTimer(Duration(minutes: minutes));
-                    Navigator.pop(ctx);
-                  },
-                ),
-              ),
+            ),
+            if (player.isSleepTimerActive)
               ListTile(
-                leading: const Icon(Icons.timer_outlined),
-                title: const Text('Custom...'),
+                leading: const Icon(Icons.timer_off, color: Colors.red),
+                title: const Text('Turn off timer'),
                 onTap: () {
+                  player.cancelSleepTimer();
                   Navigator.pop(ctx);
-                  _showCustomSleepTimer(context, player);
                 },
               ),
-              const SizedBox(height: 8),
-            ],
-          ),
+            ...options.map(
+              (minutes) => ListTile(
+                leading: const Icon(Icons.timer),
+                title: Text(
+                  minutes >= 60
+                      ? '${minutes ~/ 60}h ${minutes % 60}m'
+                      : '${minutes}m',
+                ),
+                onTap: () {
+                  player.startSleepTimer(Duration(minutes: minutes));
+                  Navigator.pop(ctx);
+                },
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.timer_outlined),
+              title: const Text('Custom...'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showCustomSleepTimer(context, player);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
         ),
       ),
     );
@@ -1171,6 +1428,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 }
+
 
 class _PlayerErrorBanner extends StatelessWidget {
   final String message;
@@ -2233,7 +2491,7 @@ class _SeekWaveformState extends State<_SeekWaveform>
           child: Text(
             formatDuration(widget.duration),
             textAlign: TextAlign.end,
-            style: _timeStyle,
+            style: PlayerScreen._timeStyle,
           ),
         ),
       ],
@@ -2253,17 +2511,16 @@ class _BlurredArtworkBackground extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        if (original.isNotEmpty || fallback.isNotEmpty)
+        if (original.isNotEmpty)
           CachedNetworkImage(
-            imageUrl: fallback.isNotEmpty ? fallback : original,
+            imageUrl: original,
             fit: BoxFit.cover,
             placeholder: (context, url) => Container(color: Colors.black),
-            memCacheWidth: 900,
-            errorWidget: (context, url, error) => original.isNotEmpty
+            errorWidget: (context, url, error) =>
+                fallback.isNotEmpty && fallback != original
                 ? CachedNetworkImage(
-                    imageUrl: original,
+                    imageUrl: fallback,
                     fit: BoxFit.cover,
-                    memCacheWidth: 900,
                     errorWidget: (context, url, error) =>
                         Container(color: Colors.black),
                   )
@@ -2288,16 +2545,10 @@ class _BlurredArtworkBackground extends StatelessWidget {
   }
 }
 
-const _timeStyle = TextStyle(
-  color: Colors.white70,
-  fontSize: 11,
-  fontWeight: FontWeight.w600,
-);
-
 class _Artwork extends StatelessWidget {
   final String? imageUrl;
 
-  const _Artwork({super.key, required this.imageUrl});
+  const _Artwork({required this.imageUrl});
 
   @override
   Widget build(BuildContext context) {
@@ -2333,13 +2584,13 @@ class _ArtworkImage extends StatelessWidget {
     final original = imageUrl ?? '';
     final fallback = _hiFiArtworkUrl(imageUrl);
     return CachedNetworkImage(
-      imageUrl: fallback.isNotEmpty ? fallback : original,
+      imageUrl: original,
       fit: BoxFit.cover,
       placeholder: (context, url) => Container(color: const Color(0xFF282828)),
-      memCacheWidth: 900,
-      errorWidget: (context, url, error) => original.isNotEmpty
+      errorWidget: (context, url, error) =>
+          fallback.isNotEmpty && fallback != original
           ? CachedNetworkImage(
-              imageUrl: original,
+              imageUrl: fallback,
               fit: BoxFit.cover,
               placeholder: (context, url) =>
                   Container(color: const Color(0xFF282828)),
@@ -2375,68 +2626,11 @@ String _hiFiArtworkUrl(String? url) {
     'mqdefault.jpg',
     'hqdefault.jpg',
     'sddefault.jpg',
-    'maxresdefault.jpg',
   };
   if (!replaceable.contains(last)) return value;
   final segments = [...uri.pathSegments];
-  segments[segments.length - 1] = 'maxresdefault.jpg';
+  segments[segments.length - 1] = 'hqdefault.jpg';
   return uri.replace(pathSegments: segments).toString();
-}
-
-class _SaveActionIcon extends StatelessWidget {
-  final IconData icon;
-
-  const _SaveActionIcon({required this.icon});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 42,
-      height: 42,
-      decoration: BoxDecoration(
-        color: Colors.white.withAlpha(12),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Icon(icon, size: 20),
-    );
-  }
-}
-
-class _QuickActionButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onPressed;
-
-  const _QuickActionButton({
-    required this.icon,
-    required this.label,
-    required this.onPressed,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Flexible(
-      child: TextButton.icon(
-        style: TextButton.styleFrom(
-          foregroundColor: Colors.white,
-          backgroundColor: Colors.white.withAlpha(24),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-          minimumSize: const Size(0, 38),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-          ),
-        ),
-        onPressed: onPressed,
-        icon: Icon(icon, size: 16),
-        label: Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
-        ),
-      ),
-    );
-  }
 }
 
 class _HeaderButton extends StatelessWidget {

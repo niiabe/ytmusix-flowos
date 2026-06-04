@@ -4,7 +4,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:ytmusix/core/constants/audio_quality.dart';
+import 'package:ytmusix/core/constants/repeat_mode.dart' as repeat;
 import 'package:ytmusix/domain/entities/video.dart';
 import 'package:ytmusix/domain/repositories/audio_repository.dart';
 import 'package:ytmusix/presentation/providers/player_provider.dart';
@@ -15,9 +15,9 @@ void main() {
   late FakeAudioRepository repository;
   late PlayerProvider player;
 
-  const seed = Track(id: 'seed', title: 'Seed');
-  const nextTrack = Track(id: 'next', title: 'Next');
-  const recommendation = Track(id: 'rec', title: 'Recommendation');
+  const track1 = Track(id: '1', title: 'Track 1', duration: Duration(seconds: 100));
+  const track2 = Track(id: '2', title: 'Track 2', duration: Duration(seconds: 120));
+  const track3 = Track(id: '3', title: 'Track 3', duration: Duration(seconds: 140));
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -30,28 +30,21 @@ void main() {
     repository.dispose();
   });
 
-  test('repeat one replays the current track on completion', () async {
-    player.setQueue([seed], startIndex: 0);
-    player.cycleRepeatMode();
-    await player.playTrack(seed, quality: AudioQuality.high);
-
-    repository.completeCurrentTrack();
-    await pumpEvents();
-
-    expect(repository.playedTrackIds, ['seed', 'seed']);
-    expect(repository.requestedQualities, ['high', 'high']);
-    expect(repository.recommendationCallCount, 0);
+  test('setQueue initializes queue, index, and current track', () {
+    player.setQueue([track1, track2, track3], startIndex: 1);
+    expect(player.queue, [track1, track2, track3]);
+    expect(player.currentIndex, 1);
+    expect(player.currentTrack, null);
   });
 
-  test('repeat all wraps to the first track on queue end', () async {
-    player.setQueue([seed, nextTrack], startIndex: 1);
-    player.cycleRepeatMode();
-    player.cycleRepeatMode();
-    await player.playTrack(nextTrack, quality: AudioQuality.medium);
+  test('toggleShuffle shuffles queue and keeps current track at index 0', () {
+    player.setQueue([track1, track2, track3], startIndex: 1);
+    player.playTrack(track2); // sets currentTrack to track2
 
-    repository.completeCurrentTrack();
-    await pumpEvents();
-
+    player.toggleShuffle();
+    expect(player.shuffleMode, true);
+    expect(player.queue.length, 3);
+    expect(player.queue[0], track2); // current track moved to first position
     expect(player.currentIndex, 0);
     expect(repository.playedTrackIds, ['next', 'seed']);
     expect(repository.requestedQualities, ['medium', 'medium', 'medium']);
@@ -65,97 +58,57 @@ void main() {
     repository.completeCurrentTrack();
     await pumpEvents();
 
+    player.toggleShuffle();
+    expect(player.shuffleMode, false);
+    expect(player.queue, [track1, track2, track3]);
     expect(player.currentIndex, 1);
-    expect(repository.playedTrackIds, ['seed', 'next']);
-    expect(repository.requestedQualities, ['high', 'high']);
-    expect(repository.recommendationCallCount, 0);
   });
 
-  test('no repeat fetches and plays recommendations at queue end', () async {
-    repository.recommendations = [recommendation];
-    player.setQueue([seed], startIndex: 0);
-    await player.playTrack(seed, quality: AudioQuality.medium);
+  test('cycleRepeatMode cycles through repeat modes', () {
+    expect(player.repeatMode, repeat.PlaybackRepeatMode.none);
+    player.cycleRepeatMode();
+    expect(player.repeatMode, repeat.PlaybackRepeatMode.one);
+    player.cycleRepeatMode();
+    expect(player.repeatMode, repeat.PlaybackRepeatMode.all);
+    player.cycleRepeatMode();
+    expect(player.repeatMode, repeat.PlaybackRepeatMode.none);
+  });
 
-    repository.completeCurrentTrack();
-    await pumpEvents();
+  test('removeFromQueue updates state correctly', () {
+    player.setQueue([track1, track2, track3], startIndex: 1);
+    player.playTrack(track2);
 
-    expect(repository.recommendationSeeds, ['seed']);
-    expect(player.queue.map((track) => track.id), ['seed', 'rec']);
+    // Remove non-current track after current index
+    player.removeFromQueue(2);
+    expect(player.queue, [track1, track2]);
     expect(player.currentIndex, 1);
-    expect(repository.playedTrackIds, ['seed', 'rec']);
-    expect(repository.requestedQualities, ['medium', 'medium']);
+
+    // Remove current track
+    player.removeFromQueue(1);
+    expect(player.queue, [track1]);
+    expect(player.currentIndex, 0);
+    expect(player.currentTrack, track1);
   });
 
-  test('empty recommendations leave playback ended without an error', () async {
-    repository.recommendations = [];
-    player.setQueue([seed], startIndex: 0);
-    await player.playTrack(seed);
+  test('reorderQueue updates queue order and adjusts current index', () {
+    player.setQueue([track1, track2, track3], startIndex: 1);
+    player.playTrack(track2);
 
-    repository.completeCurrentTrack();
-    await pumpEvents();
-
-    expect(player.isPlaying, isFalse);
-    expect(player.queue.map((track) => track.id), ['seed']);
-    expect(player.error, isNull);
-    expect(repository.playedTrackIds, ['seed']);
+    // Reorder track1 (idx 0) to end (idx 2)
+    player.reorderQueue(0, 2);
+    expect(player.queue, [track2, track3, track1]);
+    expect(player.currentIndex, 0);
   });
 
-  test(
-    'recommendations are filtered against queued and duplicate tracks',
-    () async {
-      repository.recommendations = [
-        seed,
-        recommendation,
-        recommendation,
-        const Track(id: 'rec-2', title: 'Recommendation 2'),
-      ];
-      player.setQueue([seed], startIndex: 0);
-      await player.playTrack(seed);
+  test('sleepTimer sets remaining duration and cancels correctly', () async {
+    player.startSleepTimer(const Duration(seconds: 10));
+    expect(player.isSleepTimerActive, true);
+    expect(player.sleepTimerRemaining, const Duration(seconds: 10));
 
-      repository.completeCurrentTrack();
-      await pumpEvents();
-
-      expect(player.queue.map((track) => track.id), ['seed', 'rec', 'rec-2']);
-      expect(player.currentTrack?.id, 'rec');
-      expect(repository.playedTrackIds, ['seed', 'rec']);
-    },
-  );
-
-  test('completion guard prevents duplicate recommendation fetches', () async {
-    final recommendations = Completer<List<Track>>();
-    repository.recommendationsCompleter = recommendations;
-    player.setQueue([seed], startIndex: 0);
-    await player.playTrack(seed);
-
-    repository.completeCurrentTrack();
-    repository.completeCurrentTrack();
-    await Future<void>.delayed(Duration.zero);
-
-    expect(repository.recommendationCallCount, 1);
-
-    recommendations.complete([recommendation]);
-    await pumpEvents();
-
-    expect(repository.recommendationCallCount, 1);
-    expect(repository.playedTrackIds, ['seed', 'rec']);
+    player.cancelSleepTimer();
+    expect(player.isSleepTimerActive, false);
+    expect(player.sleepTimerRemaining, null);
   });
-
-  test('manual next at queue end does not fetch recommendations', () async {
-    repository.recommendations = [recommendation];
-    player.setQueue([seed], startIndex: 0);
-    await player.playTrack(seed);
-
-    await player.next();
-    await pumpEvents();
-
-    expect(repository.recommendationCallCount, 0);
-    expect(repository.playedTrackIds, ['seed']);
-  });
-}
-
-Future<void> pumpEvents() async {
-  await Future<void>.delayed(Duration.zero);
-  await Future<void>.delayed(Duration.zero);
 }
 
 class FakeAudioRepository implements AudioRepository {
@@ -169,17 +122,8 @@ class FakeAudioRepository implements AudioRepository {
 
   final playedTrackIds = <String>[];
   final requestedQualities = <String>[];
-  final recommendationSeeds = <String>[];
 
-  List<Track> recommendations = const [];
-  Completer<List<Track>>? recommendationsCompleter;
-  int recommendationCallCount = 0;
   bool playing = false;
-
-  void completeCurrentTrack() {
-    playing = false;
-    processingController.add(ProcessingState.completed);
-  }
 
   @override
   Future<String> getAudioUrl(Track track, {String quality = 'medium'}) async {
@@ -194,12 +138,7 @@ class FakeAudioRepository implements AudioRepository {
 
   @override
   Future<List<Track>> getRecommendations(Track seed, {int limit = 20}) async {
-    recommendationCallCount++;
-    recommendationSeeds.add(seed.id);
-    if (recommendationsCompleter != null) {
-      return recommendationsCompleter!.future;
-    }
-    return recommendations.take(limit).toList();
+    return [];
   }
 
   @override

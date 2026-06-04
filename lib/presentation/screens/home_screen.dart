@@ -1,13 +1,8 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/playlist_sort_mode.dart';
-import '../../domain/entities/chart_item.dart';
 import '../../domain/entities/playlist.dart';
 import '../../domain/entities/video.dart';
-import '../../service/chart_service.dart';
-import '../providers/chart_provider.dart';
 import '../providers/playlist_provider.dart';
 import '../providers/player_provider.dart';
 import '../providers/download_provider.dart';
@@ -31,24 +26,13 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  static const _tabs = [
-    'Recent',
-    'Playlists',
-    'New',
-    'Trend',
-    'Podcasts',
-    'Favourites',
-  ];
+  static const _tabs = ['Recent', 'New', 'Trend', 'Podcasts', 'Favourites'];
   int _homeTab = 0;
-  StreamSubscription<String>? _downloadCompletionSub;
-
-  bool get _isPlaylistTab => _homeTab == 1;
-  bool get _isFavoritesTab => _homeTab == 5;
 
   String? get _activeFeedKey {
-    if (_homeTab == 2) return 'new';
-    if (_homeTab == 3) return 'trend';
-    if (_homeTab == 4) return 'podcasts';
+    if (_homeTab == 1) return 'new';
+    if (_homeTab == 2) return 'trend';
+    if (_homeTab == 3) return 'podcasts';
     return null;
   }
 
@@ -61,25 +45,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context.read<PlaylistProvider>().loadFavoriteCollections();
       context.read<ChartProvider>().loadCharts();
       context.read<PlayerProvider>().loadRecentlyPlayed();
-      _downloadCompletionSub ??= context
-          .read<DownloadProvider>()
-          .completionMessages
-          .listen((message) {
-            if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(message),
-                duration: const Duration(seconds: 2),
-              ),
-            );
-          });
     });
-  }
-
-  @override
-  void dispose() {
-    _downloadCompletionSub?.cancel();
-    super.dispose();
   }
 
   void _selectHomeTab(int index) {
@@ -175,15 +141,21 @@ class _HomeScreenState extends State<HomeScreen> {
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
       child: Row(
         children: [
-          _homeLogoButton(),
+          const PixelLogo(size: 40),
           const Spacer(),
           _roundIconButton(
-            icon: Icons.search_rounded,
+            icon: Icons.search,
             tooltip: 'Search YouTube',
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const SearchScreen()),
             ),
+          ),
+          const SizedBox(width: 8),
+          _roundIconButton(
+            icon: Icons.link_rounded,
+            tooltip: 'Paste YouTube link',
+            onPressed: () => _showLinkDialog(context),
           ),
           const SizedBox(width: 8),
           Consumer<PlaylistProvider>(
@@ -192,12 +164,6 @@ class _HomeScreenState extends State<HomeScreen> {
               tooltip: 'Sort playlists',
               onPressed: () => _showSortSheet(context, provider),
             ),
-          ),
-          const SizedBox(width: 8),
-          _roundIconButton(
-            icon: Icons.link_rounded,
-            tooltip: 'Paste YouTube link',
-            onPressed: () => _showLinkDialog(context),
           ),
           const SizedBox(width: 8),
           _roundIconButton(
@@ -210,21 +176,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _homeLogoButton() {
-    return Container(
-      width: 54,
-      height: 54,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: const Color(0xFF171717),
-        borderRadius: BorderRadius.circular(18),
-        // REMOVE THIS LINE
-        // border: Border.all(color: Colors.white.withAlpha(10)),
-      ),
-      child: const PixelLogo(size: 34),
     );
   }
 
@@ -370,7 +321,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildContent(BuildContext context) {
     return Consumer3<PlaylistProvider, PlayerProvider, DownloadProvider>(
       builder: (context, provider, playerProvider, downloadProvider, _) {
-        final chartProvider = context.watch<ChartProvider>();
         final feedKey = _activeFeedKey;
         final feedTracks = feedKey == null
             ? const <Track>[]
@@ -384,14 +334,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
         if (provider.playlists.isEmpty &&
             provider.favoriteIds.isEmpty &&
-            chartProvider.recommendedSongs.isEmpty &&
-            chartProvider.hotAlbums.isEmpty &&
-            chartProvider.appleTopSongs.isEmpty &&
-            !chartProvider.isLoading(ChartService.recommendedSongsKey) &&
-            !chartProvider.isLoading(ChartService.hotAlbumsKey) &&
-            !chartProvider.isLoading(
-              ChartService.appleTopSongsKey(chartProvider.appleTopSongsScope),
-            ) &&
             feedKey == null) {
           return Center(
             child: Column(
@@ -471,54 +413,6 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 18),
               _buildCategoryTabs(),
               const SizedBox(height: 22),
-              if (_homeTab == 0) ...[
-                _buildChartShelf(
-                  context,
-                  title: 'Recommended Songs',
-                  subtitle: 'Apple Music Ghana Hot 100',
-                  items: chartProvider.recommendedSongs,
-                  isLoading: chartProvider.isLoading(
-                    ChartService.recommendedSongsKey,
-                  ),
-                  playerProvider: playerProvider,
-                  playlistProvider: provider,
-                  playlistId: '__chart_recommended_songs',
-                  onRefresh: () =>
-                      chartProvider.loadRecommendedSongs(force: true),
-                ),
-                const SizedBox(height: 28),
-                _buildChartShelf(
-                  context,
-                  title: 'Hot Albums',
-                  subtitle: 'Apple Music Ghana albums',
-                  items: chartProvider.hotAlbums,
-                  isLoading: chartProvider.isLoading(ChartService.hotAlbumsKey),
-                  playerProvider: playerProvider,
-                  playlistProvider: provider,
-                  playlistId: '__chart_hot_albums',
-                  onRefresh: () => chartProvider.loadHotAlbums(force: true),
-                ),
-                const SizedBox(height: 28),
-                _buildChartShelf(
-                  context,
-                  title: 'Apple Top 100',
-                  subtitle: '${chartProvider.appleTopSongsScope.label} songs',
-                  items: chartProvider.appleTopSongs,
-                  isLoading: chartProvider.isLoading(
-                    ChartService.appleTopSongsKey(
-                      chartProvider.appleTopSongsScope,
-                    ),
-                  ),
-                  playerProvider: playerProvider,
-                  playlistProvider: provider,
-                  playlistId:
-                      '__chart_apple_top_100_${chartProvider.appleTopSongsScope.name}',
-                  headerAction: _buildAppleTopScopeSelector(chartProvider),
-                  autoPlayOnResolve: false,
-                  onRefresh: () => chartProvider.loadAppleTopSongs(force: true),
-                ),
-                const SizedBox(height: 28),
-              ],
               if (feedKey != null)
                 _buildTrackShelf(
                   context,
@@ -552,6 +446,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   playerProvider,
                   _isFavoritesTab ? provider.favoriteIds : null,
                 ),
+              const SizedBox(height: 28),
+              _buildTopHits(
+                context,
+                _filteredPlaylists(provider),
+                feedTracks,
+                playerProvider,
+                _homeTab == 4 ? provider.favoriteIds : null,
+              ),
             ],
           ),
         );
@@ -1278,7 +1180,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    _homeTab == 5
+                    _homeTab == 4
                         ? 'Star tracks to fill your favourites chart.'
                         : _activeFeedKey != null
                         ? 'Pull to refresh YouTube results.'
@@ -1332,9 +1234,8 @@ class _HomeScreenState extends State<HomeScreen> {
       case 1:
       case 2:
       case 3:
-      case 4:
         return playlists;
-      case 5:
+      case 4:
         final favoriteIds = provider.favoriteIds;
         return playlists
             .where(
@@ -1807,6 +1708,7 @@ class ChartPendingTile extends StatelessWidget {
   }
 }
 
+
 class _HomeTrackCard extends StatelessWidget {
   final Track track;
   final bool isCurrent;
@@ -1876,103 +1778,6 @@ class _HomeTrackCard extends StatelessWidget {
           const SizedBox(height: 3),
           Text(
             track.author ?? 'YouTube',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Colors.white54,
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.8,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ChartItemCard extends StatelessWidget {
-  final ChartItem item;
-  final VoidCallback onTap;
-  final VoidCallback onPlay;
-
-  const _ChartItemCard({
-    required this.item,
-    required this.onTap,
-    required this.onPlay,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Stack(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: SizedBox(
-                  width: 138,
-                  height: 138,
-                  child: Image.network(
-                    item.artworkUrl ?? '',
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, _, _) => Container(
-                      color: const Color(0xFF252525),
-                      child: Icon(
-                        item.kind == ChartItemKind.album
-                            ? Icons.album_rounded
-                            : Icons.music_note_rounded,
-                        color: Colors.white38,
-                        size: 42,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 8,
-                top: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withAlpha(190),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    '#${item.rank}',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                right: 8,
-                bottom: 8,
-                child: _MiniAction(
-                  icon: Icons.play_arrow_rounded,
-                  onPressed: onPlay,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(
-            item.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            item.artist,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
