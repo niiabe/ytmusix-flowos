@@ -1,13 +1,16 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../core/utils/format_duration.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../domain/entities/search_result_models.dart';
 import '../../domain/entities/video.dart';
 import '../providers/player_provider.dart';
 import '../providers/playlist_provider.dart';
 import '../providers/settings_provider.dart';
+import '../providers/download_provider.dart';
 import '../widgets/track_action_sheet.dart';
 import '../widgets/now_playing_fab.dart';
+import '../widgets/video_tile.dart';
 import 'album_screen.dart';
 import 'artist_screen.dart';
 import 'player_screen.dart';
@@ -26,6 +29,8 @@ class _SearchScreenState extends State<SearchScreen>
   final _focusNode = FocusNode();
   late TabController _tabController;
   bool _hasSearched = false;
+  Timer? _debounce;
+  List<String> _suggestions = [];
 
   @override
   void initState() {
@@ -38,6 +43,7 @@ class _SearchScreenState extends State<SearchScreen>
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _controller.dispose();
     _focusNode.dispose();
     _tabController.dispose();
@@ -48,10 +54,33 @@ class _SearchScreenState extends State<SearchScreen>
     final query = _controller.text.trim();
     if (query.isEmpty) return;
     _focusNode.unfocus();
-    setState(() => _hasSearched = true);
+    setState(() {
+      _hasSearched = true;
+      _suggestions = [];
+    });
     final provider = context.read<PlaylistProvider>();
     await provider.addSearchHistory(query);
     await provider.searchAll(query);
+  }
+
+  void _onSearchChanged(String query) {
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    _debounce = Timer(const Duration(milliseconds: 300), () async {
+      if (query.trim().isEmpty) {
+        if (mounted) {
+          setState(() {
+            _suggestions = [];
+          });
+        }
+        return;
+      }
+      final suggestions = await context.read<PlaylistProvider>().getSearchSuggestions(query);
+      if (mounted) {
+        setState(() {
+          _suggestions = suggestions;
+        });
+      }
+    });
   }
 
   void _searchFromHistory(String query) {
@@ -144,7 +173,7 @@ class _SearchScreenState extends State<SearchScreen>
                           contentPadding: EdgeInsets.zero,
                         ),
                         onSubmitted: (_) => _search(),
-                        onChanged: (_) => setState(() {}),
+                        onChanged: _onSearchChanged,
                       ),
                     ),
                     if (_controller.text.isNotEmpty)
@@ -152,7 +181,10 @@ class _SearchScreenState extends State<SearchScreen>
                         icon: const Icon(Icons.close_rounded),
                         onPressed: () {
                           _controller.clear();
-                          setState(() {});
+                          if (_debounce?.isActive ?? false) _debounce!.cancel();
+                          setState(() {
+                            _suggestions = [];
+                          });
                         },
                       ),
                     SizedBox(
@@ -186,25 +218,24 @@ class _SearchScreenState extends State<SearchScreen>
             ),
             const SizedBox(height: 8),
             if (_hasSearched && !provider.isCategorizedSearching)
-              TabBar(
-                controller: _tabController,
-                isScrollable: true,
-                labelColor: Theme.of(context).colorScheme.primary,
-                unselectedLabelColor: Colors.white54,
-                indicatorColor: Theme.of(context).colorScheme.primary,
-                indicatorSize: TabBarIndicatorSize.label,
-                tabAlignment: TabAlignment.start,
-                labelStyle: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
+              Padding(
+                padding: const EdgeInsets.only(left: 20, top: 4, bottom: 8),
+                child: TabBar(
+                  controller: _tabController,
+                  isScrollable: true,
+                  tabAlignment: TabAlignment.start,
+                  dividerColor: Colors.transparent,
+                  indicatorColor: Colors.transparent,
+                  indicator: const BoxDecoration(),
+                  labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+                  tabs: [
+                    _buildTabChip('Songs', 0),
+                    _buildTabChip('Videos', 1),
+                    _buildTabChip('Albums', 2),
+                    _buildTabChip('Artists', 3),
+                    _buildTabChip('Playlists', 4),
+                  ],
                 ),
-                tabs: const [
-                  Tab(text: 'Songs'),
-                  Tab(text: 'Videos'),
-                  Tab(text: 'Albums'),
-                  Tab(text: 'Artists'),
-                  Tab(text: 'Playlists'),
-                ],
               ),
             Expanded(child: _buildContent(provider)),
           ],
@@ -216,6 +247,10 @@ class _SearchScreenState extends State<SearchScreen>
   Widget _buildContent(PlaylistProvider provider) {
     if (provider.isCategorizedSearching) {
       return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_controller.text.isNotEmpty && _suggestions.isNotEmpty) {
+      return _buildSuggestionsSection();
     }
 
     if (!_hasSearched) {
@@ -241,6 +276,37 @@ class _SearchScreenState extends State<SearchScreen>
         _buildArtistsList(results.artists),
         _buildPlaylistsList(results.playlists),
       ],
+    );
+  }
+
+  Widget _buildSuggestionsSection() {
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      itemCount: _suggestions.length,
+      itemBuilder: (context, index) {
+        final suggestion = _suggestions[index];
+        return Container(
+          margin: const EdgeInsets.only(bottom: 6),
+          decoration: BoxDecoration(
+            color: const Color(0xFF171717),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.white.withAlpha(8)),
+          ),
+          child: ListTile(
+            leading: const Icon(Icons.search_rounded, color: Colors.white38, size: 20),
+            title: Text(
+              suggestion,
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+            ),
+            trailing: const Icon(Icons.north_west_rounded, color: Colors.white24, size: 16),
+            onTap: () {
+              _controller.text = suggestion;
+              _suggestions = [];
+              _search();
+            },
+          ),
+        );
+      },
     );
   }
 
@@ -398,6 +464,10 @@ class _SearchScreenState extends State<SearchScreen>
         ),
       );
     }
+    final player = context.watch<PlayerProvider>();
+    final downloadProvider = context.watch<DownloadProvider>();
+    final playlistProvider = context.watch<PlaylistProvider>();
+
     return RefreshIndicator(
       onRefresh: _search,
       child: ListView.builder(
@@ -405,7 +475,32 @@ class _SearchScreenState extends State<SearchScreen>
         itemCount: songs.length,
         itemBuilder: (context, index) {
           final track = songs[index];
-          return _buildTrackTile(track, songs, index);
+          return TrackTile(
+            track: track,
+            isCurrent: player.currentTrack?.id == track.id,
+            isDownloaded: downloadProvider.downloadedTrackIds.contains(track.id),
+            isDownloading: downloadProvider.activeDownloads.containsKey(track.id),
+            isFavorite: playlistProvider.isFavorite(track.id),
+            onDownload: downloadProvider.downloadedTrackIds.contains(track.id)
+                ? null
+                : () {
+                    final quality = context.read<SettingsProvider>().audioQuality;
+                    downloadProvider.downloadTrack(
+                      track,
+                      '__search__',
+                      quality: quality.name,
+                    );
+                  },
+            onToggleFavorite: () => playlistProvider.toggleFavorite(track),
+            onMore: () => showTrackActionSheet(
+              context,
+              track: track,
+              queue: songs,
+              index: index,
+              playlistId: '__search__',
+            ),
+            onTap: () => _playTrack(track, songs, index),
+          );
         },
       ),
     );
@@ -420,6 +515,10 @@ class _SearchScreenState extends State<SearchScreen>
         ),
       );
     }
+    final player = context.watch<PlayerProvider>();
+    final downloadProvider = context.watch<DownloadProvider>();
+    final playlistProvider = context.watch<PlaylistProvider>();
+
     return RefreshIndicator(
       onRefresh: _search,
       child: ListView.builder(
@@ -427,7 +526,32 @@ class _SearchScreenState extends State<SearchScreen>
         itemCount: videos.length,
         itemBuilder: (context, index) {
           final track = videos[index];
-          return _buildTrackTile(track, videos, index);
+          return TrackTile(
+            track: track,
+            isCurrent: player.currentTrack?.id == track.id,
+            isDownloaded: downloadProvider.downloadedTrackIds.contains(track.id),
+            isDownloading: downloadProvider.activeDownloads.containsKey(track.id),
+            isFavorite: playlistProvider.isFavorite(track.id),
+            onDownload: downloadProvider.downloadedTrackIds.contains(track.id)
+                ? null
+                : () {
+                    final quality = context.read<SettingsProvider>().audioQuality;
+                    downloadProvider.downloadTrack(
+                      track,
+                      '__search__',
+                      quality: quality.name,
+                    );
+                  },
+            onToggleFavorite: () => playlistProvider.toggleFavorite(track),
+            onMore: () => showTrackActionSheet(
+              context,
+              track: track,
+              queue: videos,
+              index: index,
+              playlistId: '__search__',
+            ),
+            onTap: () => _playTrack(track, videos, index),
+          );
         },
       ),
     );
@@ -464,12 +588,17 @@ class _SearchScreenState extends State<SearchScreen>
               ),
               leading: ClipRRect(
                 borderRadius: BorderRadius.circular(10),
-                child: Image.network(
-                  album.thumbnailUrl ?? '',
+                child: CachedNetworkImage(
+                  imageUrl: album.thumbnailUrl ?? '',
                   width: 54,
                   height: 54,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => Container(
+                  placeholder: (context, url) => Container(
+                    width: 54,
+                    height: 54,
+                    color: const Color(0xFF282828),
+                  ),
+                  errorWidget: (context, url, error) => Container(
                     width: 54,
                     height: 54,
                     color: Colors.grey[800],
@@ -487,7 +616,7 @@ class _SearchScreenState extends State<SearchScreen>
                 '${album.artist}${album.year != null ? ' · ${album.year}' : ''}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12),
+                style: const TextStyle(fontSize: 12, color: Colors.white54),
               ),
               onTap: () => Navigator.push(
                 context,
@@ -538,12 +667,17 @@ class _SearchScreenState extends State<SearchScreen>
                 vertical: 6,
               ),
               leading: ClipOval(
-                child: Image.network(
-                  artist.thumbnailUrl ?? '',
+                child: CachedNetworkImage(
+                  imageUrl: artist.thumbnailUrl ?? '',
                   width: 54,
                   height: 54,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => Container(
+                  placeholder: (context, url) => Container(
+                    width: 54,
+                    height: 54,
+                    color: const Color(0xFF282828),
+                  ),
+                  errorWidget: (context, url, error) => Container(
                     width: 54,
                     height: 54,
                     color: Colors.grey[800],
@@ -559,7 +693,7 @@ class _SearchScreenState extends State<SearchScreen>
               ),
               subtitle: const Text(
                 'Artist',
-                style: TextStyle(fontSize: 12),
+                style: TextStyle(fontSize: 12, color: Colors.white54),
               ),
               onTap: () => Navigator.push(
                 context,
@@ -608,12 +742,17 @@ class _SearchScreenState extends State<SearchScreen>
               ),
               leading: ClipRRect(
                 borderRadius: BorderRadius.circular(10),
-                child: Image.network(
-                  playlist.thumbnailUrl ?? '',
+                child: CachedNetworkImage(
+                  imageUrl: playlist.thumbnailUrl ?? '',
                   width: 54,
                   height: 54,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => Container(
+                  placeholder: (context, url) => Container(
+                    width: 54,
+                    height: 54,
+                    color: const Color(0xFF282828),
+                  ),
+                  errorWidget: (context, url, error) => Container(
                     width: 54,
                     height: 54,
                     color: Colors.grey[800],
@@ -631,7 +770,7 @@ class _SearchScreenState extends State<SearchScreen>
                 playlist.artist,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12),
+                style: const TextStyle(fontSize: 12, color: Colors.white54),
               ),
               onTap: () async {
                 final provider = context.read<PlaylistProvider>();
@@ -654,77 +793,36 @@ class _SearchScreenState extends State<SearchScreen>
     );
   }
 
-  Widget _buildTrackTile(Track track, List<Track> queue, int index) {
-    final playlistProvider = context.watch<PlaylistProvider>();
-    final isFav = playlistProvider.isFavorite(track.id);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFF171717),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withAlpha(12)),
-      ),
-      child: ListTile(
-        tileColor: const Color(0xFF171717),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 6,
-        ),
-        leading: ClipRRect(
-          borderRadius: BorderRadius.circular(10),
-          child: Image.network(
-            track.thumbnailUrl ?? '',
-            width: 54,
-            height: 54,
-            fit: BoxFit.cover,
-            errorBuilder: (_, _, _) => Container(
-              width: 48,
-              height: 48,
-              color: Colors.grey[800],
-              child: const Icon(Icons.music_note),
+  Widget _buildTabChip(String label, int index) {
+    return AnimatedBuilder(
+      animation: _tabController.animation ?? _tabController,
+      builder: (context, _) {
+        final indexValue =
+            _tabController.animation?.value ?? _tabController.index.toDouble();
+        final isSelected = (indexValue - index).abs() < 0.5;
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? Theme.of(context).colorScheme.primary
+                : const Color(0xFF171717),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: isSelected
+                  ? Theme.of(context).colorScheme.primary
+                  : Colors.white.withAlpha(12),
             ),
           ),
-        ),
-        title: Text(
-          track.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontWeight: FontWeight.w700),
-        ),
-        subtitle: Text(
-          '${track.author ?? "Unknown"} · ${formatDuration(track.duration)}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: Icon(
-                isFav
-                    ? Icons.favorite_rounded
-                    : Icons.favorite_border_rounded,
-                size: 18,
-                color: isFav ? const Color(0xFFFF7FA4) : null,
-              ),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
-              onPressed: () => playlistProvider.toggleFavorite(track),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: isSelected ? Colors.black : Colors.white70,
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
             ),
-            IconButton(
-              icon: const Icon(Icons.more_vert_rounded),
-              onPressed: () => showTrackActionSheet(
-                context,
-                track: track,
-                queue: queue,
-                index: index,
-                playlistId: '__search__',
-              ),
-            ),
-          ],
-        ),
-        onTap: () => _playTrack(track, queue, index),
-      ),
+          ),
+        );
+      },
     );
   }
 }

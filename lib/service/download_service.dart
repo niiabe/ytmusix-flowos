@@ -310,6 +310,25 @@ class DownloadService {
     return headers;
   }
 
+  Future<List<Track>> getAllDownloadedTracks() async {
+    await _pruneMissingDownloads();
+    final models = await _database.getAllDownloadedTracks();
+    return models.map((m) => m.toEntity()).toList();
+  }
+
+  Future<void> deleteDownloadedTrack(String trackId) async {
+    final path = await _database.getDownloadedFilePath(trackId);
+    if (path != null) {
+      try {
+        final file = File(path);
+        if (file.existsSync()) {
+          file.deleteSync();
+        }
+      } catch (_) {}
+    }
+    await _database.removeDownloadedTrack(trackId);
+  }
+
   void dispose() {
     _client.close();
     _progressController.close();

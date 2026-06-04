@@ -227,6 +227,12 @@ class PlaylistRepositoryImpl implements PlaylistRepository {
   }
 
   @override
+  Future<List<Track>> getPodcastFeed() async {
+    final models = await remoteDataSource.getHashtagPodcasts();
+    return models.map((m) => m.toEntity()).toList();
+  }
+
+  @override
   Future<List<Track>> getCachedTracks(String playlistId) async {
     final models = await localDatabase.getTracks(playlistId);
     return models.map((m) => m.toEntity()).toList();

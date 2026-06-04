@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:developer' as dev;
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
 import '../../core/constants/playlist_sort_mode.dart';
 import '../../domain/entities/search_result_models.dart';
 import '../../domain/entities/playlist.dart';
@@ -195,7 +197,8 @@ class PlaylistProvider extends ChangeNotifier {
     }
   }
 
-  bool isCollectionFavorite(String collectionId) => _favoriteCollectionIds.contains(collectionId);
+  bool isCollectionFavorite(String collectionId) =>
+      _favoriteCollectionIds.contains(collectionId);
 
   Future<void> loadFavoriteCollections() async {
     try {
@@ -203,7 +206,10 @@ class PlaylistProvider extends ChangeNotifier {
       _favoriteCollectionIds = _favoriteCollections.map((c) => c.id).toSet();
       notifyListeners();
     } catch (e) {
-      dev.log('Failed to load favorite collections: $e', name: 'PlaylistProvider');
+      dev.log(
+        'Failed to load favorite collections: $e',
+        name: 'PlaylistProvider',
+      );
     }
   }
 
@@ -240,7 +246,10 @@ class PlaylistProvider extends ChangeNotifier {
         _favoriteCollections.removeWhere((c) => c.id == playlist.id);
       }
       notifyListeners();
-      dev.log('Failed to toggle favorite collection: $e', name: 'PlaylistProvider');
+      dev.log(
+        'Failed to toggle favorite collection: $e',
+        name: 'PlaylistProvider',
+      );
     }
   }
 
@@ -539,12 +548,14 @@ class PlaylistProvider extends ChangeNotifier {
 
     try {
       final query = switch (key) {
-        'new' => 'new Ghana music releases 2026 official audio',
-        'trend' => 'trending Ghana music 2026 official audio',
-        'podcasts' => 'Ghana podcasts latest episodes',
+        'new' => 'new music releases official audio',
+        'trend' => 'trending music official audio',
+        'podcasts' => 'podcasts latest episodes',
         _ => key,
       };
-      final tracks = await _repository.search(query);
+      final tracks = key == 'podcasts'
+          ? await _repository.getPodcastFeed()
+          : await _repository.search(query);
       final seen = <String>{};
       _homeFeeds[key] = [
         for (final track in tracks)
@@ -641,5 +652,28 @@ class PlaylistProvider extends ChangeNotifier {
 
   Future<ArtistDetailResult> getArtist(String artistId) async {
     return _repository.getArtist(artistId);
+  }
+
+  Future<List<String>> getSearchSuggestions(String query) async {
+    if (query.trim().isEmpty) return [];
+    try {
+      final uri = Uri.parse(
+        'https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q=${Uri.encodeComponent(query)}',
+      );
+      final response = await http.get(uri).timeout(const Duration(seconds: 3));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as List<dynamic>;
+        if (data.length > 1) {
+          final suggestions = data[1] as List<dynamic>;
+          return suggestions.map((e) => e.toString()).toList();
+        }
+      }
+    } catch (e) {
+      dev.log(
+        'Failed to fetch search suggestions: $e',
+        name: 'PlaylistProvider',
+      );
+    }
+    return [];
   }
 }
