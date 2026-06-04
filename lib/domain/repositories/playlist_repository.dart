@@ -12,6 +12,7 @@ abstract class PlaylistRepository {
   Future<List<Track>> getCachedTracks(String playlistId);
   Future<Playlist?> getCachedPlaylist(String playlistId);
   Future<List<Track>> search(String query);
+  Future<List<Track>> getPodcastFeed();
   Future<CategorizedSearchResults> searchAll(String query);
   Future<AlbumDetailResult> getAlbum(String playlistId);
   Future<ArtistDetailResult> getArtist(String artistId);

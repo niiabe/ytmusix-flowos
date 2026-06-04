@@ -8,6 +8,7 @@ import '../../core/constants/repeat_mode.dart' as repeat;
 import '../../domain/entities/video.dart';
 import '../../domain/repositories/audio_repository.dart';
 import 'package:audio_service/audio_service.dart';
+import 'package:just_audio/just_audio.dart';
 import '../../service/audio_handler.dart';
 import 'download_provider.dart';
 import 'settings_provider.dart';
@@ -72,6 +73,9 @@ class PlayerProvider extends ChangeNotifier {
   StreamSubscription<Duration>? _durationSub;
   StreamSubscription<Duration>? _bufferedPositionSub;
   StreamSubscription? _playbackStateSub;
+  StreamSubscription? _queueSub;
+  StreamSubscription? _completionSubscription;
+  bool _isHandlingCompletion = false;
 
   Timer? _sleepTimer;
   Timer? _sleepTimerTick;
@@ -193,6 +197,7 @@ class PlayerProvider extends ChangeNotifier {
   String? get currentPlaylistId => _currentPlaylistId;
   bool get isSleepTimerActive => _sleepTimer != null;
   Duration? get sleepTimerRemaining => _sleepTimerRemaining;
+  AudioQuality get lastPlaybackQuality => _lastPlaybackQuality;
 
   void setQueue(List<Track> tracks, {int startIndex = 0, String? playlistId}) {
     _queue = tracks;
@@ -303,6 +308,9 @@ class PlayerProvider extends ChangeNotifier {
       await _audioRepository.playTrack(track, audioUrl);
       _isPlaying = true;
       _startPolling();
+      if (_audioHandler == null) {
+        _listenForCompletion();
+      }
       for (final cb in _trackChangedListeners) {
         cb();
       }
@@ -438,6 +446,7 @@ class PlayerProvider extends ChangeNotifier {
 
   Future<void> stop() async {
     _stopPolling();
+    _completionSubscription?.cancel();
     await _audioRepository.stop();
     _isPlaying = false;
     _position = Duration.zero;
@@ -464,6 +473,88 @@ class PlayerProvider extends ChangeNotifier {
 
   MusicAudioHandler? _audioHandler;
 
+  bool _areQueuesEqual(List<Track> q1, List<Track> q2) {
+    if (q1.length != q2.length) return false;
+    for (int i = 0; i < q1.length; i++) {
+      if (q1[i].id != q2[i].id) return false;
+    }
+    return true;
+  }
+
+  void _listenForCompletion() {
+    _completionSubscription?.cancel();
+    _completionSubscription = _audioRepository.processingStateStream.listen((
+      state,
+    ) {
+      if (state == ProcessingState.completed) {
+        unawaited(_handleCompletion());
+      }
+    });
+  }
+
+  Future<void> _handleCompletion() async {
+    if (_isHandlingCompletion || _queue.isEmpty) return;
+    _isHandlingCompletion = true;
+
+    try {
+      if (_repeatMode == repeat.PlaybackRepeatMode.one) {
+        await playFromQueue(_currentIndex);
+        return;
+      }
+      if (_currentIndex + 1 < _queue.length) {
+        await playFromQueue(_currentIndex + 1);
+        return;
+      }
+      if (_repeatMode == repeat.PlaybackRepeatMode.all) {
+        await playFromQueue(0);
+        return;
+      }
+
+      await _playRecommendationsFromCurrentTrack();
+    } finally {
+      _isHandlingCompletion = false;
+    }
+  }
+
+  Future<void> handleTrackCompletion() async {
+    await _handleCompletion();
+  }
+
+  Future<void> _playRecommendationsFromCurrentTrack() async {
+    final seed = _currentTrack ?? _queue[_currentIndex];
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final recommendations = await _audioRepository.getRecommendations(seed);
+      final seenIds = _queue.map((track) => track.id).toSet();
+      final uniqueRecommendations = <Track>[];
+      for (final track in recommendations) {
+        if (seenIds.add(track.id)) {
+          uniqueRecommendations.add(track);
+        }
+      }
+
+      if (uniqueRecommendations.isEmpty) {
+        _isPlaying = false;
+        return;
+      }
+
+      final firstRecommendationIndex = _queue.length;
+      _queue = [..._queue, ...uniqueRecommendations];
+      _currentIndex = firstRecommendationIndex;
+      notifyListeners();
+      await playTrack(_queue[_currentIndex], quality: _lastPlaybackQuality);
+    } catch (e) {
+      _isPlaying = false;
+      _error = 'Failed to load recommendations: ${e.toString()}';
+      notifyListeners();
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
   void setAudioHandler(MusicAudioHandler handler) {
     _audioHandler = handler;
     _playbackStateSub?.cancel();
@@ -484,6 +575,20 @@ class PlayerProvider extends ChangeNotifier {
         changed = true;
       }
       if (changed) {
+        notifyListeners();
+      }
+    });
+    _queueSub?.cancel();
+    _queueSub = handler.queue.listen((items) {
+      final newTracks = items.map((item) => Track(
+        id: item.id,
+        title: item.title,
+        author: item.artist,
+        thumbnailUrl: item.artUri?.toString(),
+        duration: item.duration ?? Duration.zero,
+      )).toList();
+      if (!_areQueuesEqual(_queue, newTracks)) {
+        _queue = newTracks;
         notifyListeners();
       }
     });
@@ -524,6 +629,8 @@ class PlayerProvider extends ChangeNotifier {
     _sleepTimer?.cancel();
     _sleepTimerTick?.cancel();
     _stopPolling();
+    _completionSubscription?.cancel();
+    _queueSub?.cancel();
     _skipNextSubscription?.cancel();
     _skipPrevSubscription?.cancel();
     _mediaItemSub?.cancel();
