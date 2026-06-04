@@ -20,6 +20,8 @@ import 'album_screen.dart';
 import 'player_screen.dart';
 import 'search_screen.dart';
 import 'settings_screen.dart';
+import 'chart_list_screen.dart';
+import 'downloaded_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -235,58 +237,70 @@ class _HomeScreenState extends State<HomeScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        margin: const EdgeInsets.all(14),
-        padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
-        decoration: BoxDecoration(
-          color: const Color(0xFF171717),
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: Colors.white.withAlpha(14)),
-        ),
-        child: SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Sort playlists',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+      builder: (ctx) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => Navigator.pop(ctx),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: GestureDetector(
+            onTap: () {},
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+              decoration: BoxDecoration(
+                color: const Color(0xFF171717),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.white.withAlpha(14)),
               ),
-              const SizedBox(height: 12),
-              ...options.map((option) {
-                final selected = provider.sortMode == option.$1;
-                return ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? Theme.of(context).colorScheme.primary
-                          : Colors.white.withAlpha(12),
-                      borderRadius: BorderRadius.circular(13),
+              child: SafeArea(
+                top: false,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Sort playlists',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
-                    child: Icon(
-                      option.$3,
-                      color: selected ? Colors.black : Colors.white,
-                      size: 20,
-                    ),
-                  ),
-                  title: Text(
-                    option.$2,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  trailing: selected
-                      ? const Icon(Icons.check_circle_rounded)
-                      : null,
-                  onTap: () {
-                    provider.setSortMode(option.$1);
-                    Navigator.pop(ctx);
-                  },
-                );
-              }),
-            ],
+                    const SizedBox(height: 12),
+                    ...options.map((option) {
+                      final selected = provider.sortMode == option.$1;
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: selected
+                                ? Theme.of(context).colorScheme.primary
+                                : Colors.white.withAlpha(12),
+                            borderRadius: BorderRadius.circular(13),
+                          ),
+                          child: Icon(
+                            option.$3,
+                            color: selected ? Colors.black : Colors.white,
+                            size: 20,
+                          ),
+                        ),
+                        title: Text(
+                          option.$2,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        trailing: selected
+                            ? const Icon(Icons.check_circle_rounded)
+                            : null,
+                        onTap: () {
+                          provider.setSortMode(option.$1);
+                          Navigator.pop(ctx);
+                        },
+                      );
+                    }),
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -353,8 +367,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-
-
   Widget _buildContent(BuildContext context) {
     return Consumer3<PlaylistProvider, PlayerProvider, DownloadProvider>(
       builder: (context, provider, playerProvider, downloadProvider, _) {
@@ -418,16 +430,43 @@ class _HomeScreenState extends State<HomeScreen> {
             ]);
           },
           child: ListView(
-            padding: EdgeInsets.fromLTRB(
-              20,
-              8,
-              20,
-              146,
-            ),
+            padding: EdgeInsets.fromLTRB(20, 8, 20, 146),
             children: [
-              const Text(
-                'Browse',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Browse',
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+                  ),
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      foregroundColor: Theme.of(context).colorScheme.primary,
+                      backgroundColor: Colors.white.withAlpha(10),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 8,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    icon: const Icon(Icons.download_done_rounded, size: 18),
+                    label: const Text(
+                      'Downloaded',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const DownloadedScreen(),
+                      ),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 18),
               _buildCategoryTabs(),
@@ -840,9 +879,27 @@ class _HomeScreenState extends State<HomeScreen> {
             child: ListView.separated(
               clipBehavior: Clip.none,
               scrollDirection: Axis.horizontal,
-              itemCount: items.take(18).length,
+              itemCount: items.length > 10 ? 11 : items.length,
               separatorBuilder: (_, _) => const SizedBox(width: 14),
               itemBuilder: (context, index) {
+                if (index == 10) {
+                  return _SeeMoreCard(
+                    title: title,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ChartListScreen(
+                            title: title,
+                            subtitle: subtitle,
+                            items: items,
+                            playlistId: playlistId,
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                }
                 final item = items[index];
                 return SizedBox(
                   width: 138,
@@ -932,7 +989,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final chartProvider = context.read<ChartProvider>();
     final settings = context.read<SettingsProvider>();
     final notifier = ValueNotifier(
-      _ChartResolveState(
+      ChartResolveState(
         item: item,
         status: item.kind == ChartItemKind.album
             ? 'Finding ${item.title} songs'
@@ -941,7 +998,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     var sheetActive = true;
 
-    void update(_ChartResolveState Function(_ChartResolveState state) apply) {
+    void update(ChartResolveState Function(ChartResolveState state) apply) {
       if (!sheetActive) return;
       notifier.value = apply(notifier.value);
     }
@@ -975,7 +1032,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _ChartItemDetailsSheet(
+      builder: (_) => ChartItemDetailsSheet(
         notifier: notifier,
         onPlayTrack: playResolvedTrack,
       ),
@@ -1053,9 +1110,7 @@ class _HomeScreenState extends State<HomeScreen> {
           update(
             (state) => state.copyWith(
               hasStartedPlayback: true,
-              status: item.kind == ChartItemKind.album
-                  ? 'Playing while finding ${item.title} songs'
-                  : 'Playing ${chartItem.title}',
+              status: 'Playing ${track.title}',
             ),
           );
           if (openPlayer && context.mounted) {
@@ -1127,7 +1182,7 @@ class _HomeScreenState extends State<HomeScreen> {
             '$rawArtist $rawTitle official audio',
             '$cleanArtist $cleanTitle official audio',
             '$rawTitle $rawArtist official audio',
-            '$cleanTitle $cleanArtist official audio',
+            '$cleanArtist $cleanTitle official audio',
             if (albumTitle != null) '$rawArtist $rawTitle $albumTitle',
             if (albumTitle != null) '$cleanArtist $cleanTitle $albumTitle',
             '$rawArtist $rawTitle lyrics',
@@ -1196,7 +1251,7 @@ class _HomeScreenState extends State<HomeScreen> {
       1 => 'Playlist tracks',
       2 => 'New from YouTube',
       3 => 'Trending on YouTube',
-      4 => 'Ghana podcasts',
+      4 => 'Podcasts',
       5 => 'Favourite tracks',
       _ => 'Recent plays',
     };
@@ -1340,7 +1395,7 @@ class _EmptyShelf extends StatelessWidget {
   }
 }
 
-class _ChartResolveState {
+class ChartResolveState {
   final ChartItem item;
   final List<ChartItem> items;
   final List<Track> tracks;
@@ -1351,7 +1406,7 @@ class _ChartResolveState {
   final bool isResolving;
   final bool hasStartedPlayback;
 
-  const _ChartResolveState({
+  const ChartResolveState({
     required this.item,
     required this.status,
     this.items = const [],
@@ -1363,7 +1418,7 @@ class _ChartResolveState {
     this.hasStartedPlayback = false,
   });
 
-  _ChartResolveState copyWith({
+  ChartResolveState copyWith({
     List<ChartItem>? items,
     List<Track>? tracks,
     Map<String, Track>? resolvedTracks,
@@ -1374,7 +1429,7 @@ class _ChartResolveState {
     bool? isResolving,
     bool? hasStartedPlayback,
   }) {
-    return _ChartResolveState(
+    return ChartResolveState(
       item: item,
       items: items ?? this.items,
       tracks: tracks ?? this.tracks,
@@ -1388,23 +1443,25 @@ class _ChartResolveState {
   }
 }
 
-class _ChartItemDetailsSheet extends StatelessWidget {
-  final ValueNotifier<_ChartResolveState> notifier;
+class ChartItemDetailsSheet extends StatelessWidget {
+  final ValueNotifier<ChartResolveState> notifier;
   final Future<void> Function(Track track) onPlayTrack;
 
-  const _ChartItemDetailsSheet({
+  const ChartItemDetailsSheet({
+    super.key,
     required this.notifier,
     required this.onPlayTrack,
   });
 
   @override
   Widget build(BuildContext context) {
+    final player = context.watch<PlayerProvider>();
     return DraggableScrollableSheet(
       initialChildSize: 0.62,
       minChildSize: 0.42,
       maxChildSize: 0.88,
       builder: (context, scrollController) {
-        return ValueListenableBuilder<_ChartResolveState>(
+        return ValueListenableBuilder<ChartResolveState>(
           valueListenable: notifier,
           builder: (context, state, _) {
             final item = state.item;
@@ -1504,18 +1561,45 @@ class _ChartItemDetailsSheet extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 22),
-                  _ChartResolveStatus(state: state),
+                  ChartResolveStatus(state: state),
                   const SizedBox(height: 18),
-                  Text(
-                    isAlbum ? 'Album songs' : 'Queue preview',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w900,
-                    ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        isAlbum ? 'Album songs' : 'Queue preview',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      if (state.tracks.isNotEmpty)
+                        TextButton.icon(
+                          style: TextButton.styleFrom(
+                            foregroundColor: Theme.of(
+                              context,
+                            ).colorScheme.primary,
+                            backgroundColor: Colors.white.withAlpha(10),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                          label: const Text(
+                            'Play All',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          onPressed: () {
+                            if (state.tracks.isNotEmpty) {
+                              onPlayTrack(state.tracks.first);
+                            }
+                          },
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 12),
                   if (state.items.isEmpty)
-                    _ChartPendingTile(
+                    ChartPendingTile(
                       title: state.status,
                       subtitle: 'Searching YouTube in the background',
                     )
@@ -1523,7 +1607,16 @@ class _ChartItemDetailsSheet extends StatelessWidget {
                     ...state.items.take(18).map((chartItem) {
                       final track = state.resolvedTracks[chartItem.id];
                       final isActive = state.activeItemId == chartItem.id;
-                      return _ChartPendingTile(
+                      final isCurrentTrack =
+                          track != null && player.currentTrack?.id == track.id;
+                      final isPlaying = isCurrentTrack && player.isPlaying;
+                      final isLoading =
+                          (track != null &&
+                              isCurrentTrack &&
+                              player.isLoading) ||
+                          (track == null && isActive);
+
+                      return ChartPendingTile(
                         title: chartItem.title,
                         subtitle: track == null
                             ? isActive
@@ -1531,19 +1624,23 @@ class _ChartItemDetailsSheet extends StatelessWidget {
                                   : chartItem.artist
                             : track.author ?? chartItem.artist,
                         enabled: track != null,
+                        isPlaying: isPlaying,
+                        isLoading: isLoading,
                         onTap: track == null ? null : () => onPlayTrack(track),
                         trailing: track != null
                             ? Row(
                                 mainAxisSize: MainAxisSize.min,
-                                children: const [
-                                  Icon(
+                                children: [
+                                  const Icon(
                                     Icons.check_circle_rounded,
                                     color: Colors.greenAccent,
                                     size: 20,
                                   ),
-                                  SizedBox(width: 8),
+                                  const SizedBox(width: 8),
                                   Icon(
-                                    Icons.play_arrow_rounded,
+                                    isPlaying
+                                        ? Icons.pause_rounded
+                                        : Icons.play_arrow_rounded,
                                     color: Colors.white,
                                     size: 22,
                                   ),
@@ -1574,28 +1671,28 @@ class _ChartItemDetailsSheet extends StatelessWidget {
   }
 }
 
-class _ChartResolveStatus extends StatelessWidget {
-  final _ChartResolveState state;
+class ChartResolveStatus extends StatelessWidget {
+  final ChartResolveState state;
 
-  const _ChartResolveStatus({required this.state});
+  const ChartResolveStatus({super.key, required this.state});
 
   @override
   Widget build(BuildContext context) {
     final color = state.error != null
         ? Colors.redAccent
-        : state.hasStartedPlayback
-        ? Colors.greenAccent
-        : Theme.of(context).colorScheme.primary;
+        : state.isResolving
+        ? Theme.of(context).colorScheme.primary
+        : Colors.greenAccent;
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white.withAlpha(10),
+        color: color.withAlpha(16),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withAlpha(14)),
+        border: Border.all(color: color.withAlpha(28)),
       ),
       child: Row(
         children: [
-          if (state.isResolving && state.error == null)
+          if (state.isResolving)
             const SizedBox(
               width: 20,
               height: 20,
@@ -1625,19 +1722,24 @@ class _ChartResolveStatus extends StatelessWidget {
   }
 }
 
-class _ChartPendingTile extends StatelessWidget {
+class ChartPendingTile extends StatelessWidget {
   final String title;
   final String subtitle;
   final Widget? trailing;
   final VoidCallback? onTap;
   final bool enabled;
+  final bool isPlaying;
+  final bool isLoading;
 
-  const _ChartPendingTile({
+  const ChartPendingTile({
+    super.key,
     required this.title,
     required this.subtitle,
     this.trailing,
     this.onTap,
     this.enabled = false,
+    this.isPlaying = false,
+    this.isLoading = false,
   });
 
   @override
@@ -2069,6 +2171,56 @@ class _TopHitTile extends StatelessWidget {
         onPressed: onMore,
       ),
       onTap: onTap,
+    );
+  }
+}
+
+class _SeeMoreCard extends StatelessWidget {
+  final String title;
+  final VoidCallback onTap;
+
+  const _SeeMoreCard({required this.title, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 138,
+        height: 138,
+        decoration: BoxDecoration(
+          color: const Color(0xFF171717),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white.withAlpha(12)),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primary.withAlpha(20),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.arrow_forward_rounded,
+                color: Theme.of(context).colorScheme.primary,
+                size: 24,
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'See more',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: Colors.white70,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

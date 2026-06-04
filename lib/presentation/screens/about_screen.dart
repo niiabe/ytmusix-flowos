@@ -115,6 +115,10 @@ class _ChangelogSection extends StatelessWidget {
 
   static const _items = [
     (
+      '1.4.2',
+      'Redesigned the search screen with category-specific parallel searches, standard track tiles, cached network images, and pill-shaped chips. Implemented seamless progress switching between audio and video modes with automatic background audio pausing and video end-progression.',
+    ),
+    (
       '1.4.1',
       'Fixed background audio playback and track auto-play progression on Android devices, and introduced a toggleable 7-second crossfade feature on the Now Playing screen.',
     ),

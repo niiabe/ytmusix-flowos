@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:ui';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,6 +8,7 @@ import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:video_player/video_player.dart';
 import '../../core/constants/repeat_mode.dart' as repeat;
+import '../../core/constants/audio_quality.dart';
 import '../../core/utils/format_duration.dart';
 import '../../domain/entities/video.dart';
 import '../../service/lyrics_service.dart';
@@ -30,11 +32,18 @@ class PlayerScreen extends StatefulWidget {
 class _PlayerScreenState extends State<PlayerScreen> {
   _PlaybackMode _playbackMode = _PlaybackMode.audio;
   bool _audioPausedForVideo = false;
+  VideoPlayerController? _activeVideoController;
 
   static final _lyricsService = LyricsService();
 
   @override
   void dispose() {
+    if (_activeVideoController != null) {
+      _activeVideoController!.removeListener(_onVideoControllerTick);
+      if (_activeVideoController!.value.isPlaying) {
+        _activeVideoController!.pause();
+      }
+    }
     if (_audioPausedForVideo) {
       try {
         final player = context.read<PlayerProvider>();
@@ -44,6 +53,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
       } catch (_) {}
     }
     super.dispose();
+  }
+
+  void _onVideoControllerInitialized(VideoPlayerController? controller) {
+    if (_activeVideoController != null) {
+      _activeVideoController!.removeListener(_onVideoControllerTick);
+    }
+    _activeVideoController = controller;
+    if (_activeVideoController != null) {
+      _activeVideoController!.addListener(_onVideoControllerTick);
+    }
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _onVideoControllerTick() {
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   @override
@@ -110,6 +138,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                         : _InlineVideoPlayer(
                                             key: ValueKey('video-${track.id}'),
                                             track: track,
+                                            shouldPlay: _audioPausedForVideo || player.isPlaying,
+                                            onControllerInitialized:
+                                                _onVideoControllerInitialized,
                                           ),
                                   ),
                                   SizedBox(height: isAudio ? 28 : 24),
@@ -179,6 +210,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                       position: player.position,
                                       duration: player.duration,
                                       bufferedPosition: player.bufferedPosition,
+                                      isPlaying: player.isPlaying,
+                                      trackId: track.id,
                                       onSeek: player.seekTo,
                                     ),
                                     SizedBox(height: compact ? 24 : 30),
@@ -246,9 +279,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                       ],
                                     ),
                                     SizedBox(height: compact ? 18 : 22),
-                                  ] else
+                                  ] else if (_activeVideoController != null) ...[
+                                    _buildVideoControlsBelowTitle(
+                                      context,
+                                      player,
+                                      track,
+                                      _activeVideoController!,
+                                      compact,
+                                    ),
+                                  ] else ...[
                                     const SizedBox(height: 22),
+                                  ],
                                   _buildQuickActions(context, player, track),
+                                  SizedBox(height: compact ? 12 : 16),
+                                  _buildTrackQualityInfo(
+                                    context,
+                                    player,
+                                    track,
+                                    downloadProvider,
+                                  ),
                                   if (player.error != null) ...[
                                     const SizedBox(height: 12),
                                     _PlayerErrorBanner(message: player.error!),
@@ -304,6 +353,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (player.isPlaying) {
       await player.togglePlayPause();
       _audioPausedForVideo = true;
+    } else {
+      _audioPausedForVideo = false;
     }
     if (!mounted) return;
     setState(() => _playbackMode = _PlaybackMode.video);
@@ -311,9 +362,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> _selectAudioMode(PlayerProvider player) async {
     if (_playbackMode == _PlaybackMode.audio) return;
+
+    final videoController = _activeVideoController;
+    bool wasVideoPlaying = false;
+    if (videoController != null && videoController.value.isInitialized) {
+      final videoPos = videoController.value.position;
+      await player.seekTo(videoPos);
+      wasVideoPlaying = videoController.value.isPlaying;
+      if (wasVideoPlaying) {
+        await videoController.pause();
+      }
+    }
+
     setState(() => _playbackMode = _PlaybackMode.audio);
-    if (_audioPausedForVideo && !player.isPlaying) {
-      await player.togglePlayPause();
+    if (wasVideoPlaying) {
+      if (!player.isPlaying) {
+        await player.togglePlayPause();
+      }
+    } else {
+      if (player.isPlaying) {
+        await player.togglePlayPause();
+      }
     }
     _audioPausedForVideo = false;
   }
@@ -345,6 +414,226 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ),
       ],
     );
+  }
+
+  Widget _buildTrackQualityInfo(
+    BuildContext context,
+    PlayerProvider player,
+    Track track,
+    DownloadProvider downloadProvider,
+  ) {
+    final isDownloaded = downloadProvider.downloadedTrackIds.contains(track.id);
+    final isAudio = _playbackMode == _PlaybackMode.audio;
+
+    IconData icon;
+    String infoText;
+    Color iconColor;
+
+    if (isDownloaded) {
+      icon = Icons.offline_pin_rounded;
+      infoText = 'OFFLINE • AAC • 256 KBPS • 44.1 KHZ';
+      iconColor = const Color(0xFF81C784);
+    } else if (!isAudio) {
+      icon = Icons.hd_rounded;
+      infoText = 'STREAMING • H.264 • 720P • 30 FPS';
+      iconColor = Theme.of(context).colorScheme.primary;
+    } else {
+      icon = Icons.wifi_rounded;
+      iconColor = Colors.white70;
+      switch (player.lastPlaybackQuality) {
+        case AudioQuality.high:
+          infoText = 'STREAMING • OPUS • 160 KBPS • 48.0 KHZ';
+          iconColor = const Color(0xFFFFD54F);
+          break;
+        case AudioQuality.medium:
+          infoText = 'STREAMING • AAC • 128 KBPS • 44.1 KHZ';
+          break;
+        case AudioQuality.low:
+          infoText = 'STREAMING • AAC • 64 KBPS • 44.1 KHZ';
+          break;
+      }
+    }
+
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: Colors.white.withAlpha(12),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: Colors.white.withAlpha(16),
+            width: 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 13,
+              color: iconColor,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              infoText,
+              style: TextStyle(
+                color: Colors.white.withAlpha(160),
+                fontSize: 9,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.1,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVideoControlsBelowTitle(
+    BuildContext context,
+    PlayerProvider player,
+    Track track,
+    VideoPlayerController controller,
+    bool compact,
+  ) {
+    final value = controller.value;
+    final position = value.position;
+    final duration = value.duration;
+    final progress = duration.inMilliseconds == 0
+        ? 0.0
+        : (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0);
+
+    return Column(
+      children: [
+        SizedBox(height: compact ? 26 : 34),
+        Row(
+          children: [
+            SizedBox(
+              width: 42,
+              child: Text(formatDuration(position), style: _timeStyle),
+            ),
+            Expanded(
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  trackHeight: 3,
+                  thumbShape: const RoundSliderThumbShape(
+                    enabledThumbRadius: 6,
+                  ),
+                  overlayShape: const RoundSliderOverlayShape(
+                    overlayRadius: 14,
+                  ),
+                  activeTrackColor: Theme.of(context).colorScheme.primary,
+                  inactiveTrackColor: Colors.white24,
+                  thumbColor: Colors.white,
+                ),
+                child: Slider(
+                  value: progress,
+                  onChanged: (val) {
+                    final target = Duration(
+                      milliseconds: (duration.inMilliseconds * val).round(),
+                    );
+                    controller.seekTo(target);
+                  },
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 42,
+              child: Text(
+                formatDuration(duration),
+                textAlign: TextAlign.end,
+                style: _timeStyle,
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: compact ? 24 : 30),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            _ControlButton(
+              icon: Icons.shuffle_rounded,
+              active: player.shuffleMode,
+              onPressed: player.toggleShuffle,
+            ),
+            _ControlButton(
+              icon: Icons.skip_previous_rounded,
+              onPressed: player.previous,
+            ),
+            SizedBox(
+              width: 64,
+              height: 64,
+              child: IconButton(
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.black,
+                  shape: const CircleBorder(),
+                ),
+                icon: Icon(
+                  value.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                  size: 34,
+                ),
+                onPressed: () async {
+                  if (value.isPlaying) {
+                    await controller.pause();
+                  } else {
+                    await controller.play();
+                  }
+                  setState(() {});
+                },
+              ),
+            ),
+            _ControlButton(
+              icon: Icons.skip_next_rounded,
+              onPressed: player.currentIndex + 1 < player.queue.length
+                  ? () => player.next()
+                  : null,
+            ),
+            _ControlButton(
+              icon: Icons.fullscreen_rounded,
+              onPressed: () => _openFullscreenFromPlayerScreen(
+                context,
+                player,
+                controller,
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: compact ? 18 : 22),
+      ],
+    );
+  }
+
+  Future<void> _openFullscreenFromPlayerScreen(
+    BuildContext context,
+    PlayerProvider player,
+    VideoPlayerController controller,
+  ) async {
+    if (!controller.value.isInitialized) return;
+    final wasPlaying = controller.value.isPlaying;
+    final position = controller.value.position;
+    final videoUrl = controller.dataSource;
+    await controller.pause();
+
+    if (!context.mounted) return;
+    final track = player.currentTrack!;
+    final newPosition = await Navigator.of(context).push<Duration>(
+      MaterialPageRoute(
+        builder: (_) => _FullscreenVideoPlayer(
+          track: track,
+          videoUrl: videoUrl,
+          initialPosition: position,
+          wasPlaying: wasPlaying,
+        ),
+      ),
+    );
+    if (!context.mounted) return;
+    if (newPosition != null) {
+      await controller.seekTo(newPosition);
+    }
+    if (wasPlaying) {
+      await controller.play();
+    }
   }
 
   void _showMoreSheet(BuildContext context, PlayerProvider player) {
@@ -474,70 +763,79 @@ class _PlayerScreenState extends State<PlayerScreen> {
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (ctx) => Material(
-        color: Colors.transparent,
-        child: SafeArea(
-          top: false,
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.85,
-            ),
-            child: Container(
-              margin: const EdgeInsets.all(14),
-              padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
-              decoration: BoxDecoration(
-                color: const Color(0xFF171717),
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: Colors.white.withAlpha(14)),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Now playing',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+      builder: (ctx) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => Navigator.pop(ctx),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: GestureDetector(
+            onTap: () {},
+            child: Material(
+              color: Colors.transparent,
+              child: SafeArea(
+                top: false,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(context).size.height * 0.85,
                   ),
-                  const SizedBox(height: 12),
-                  Flexible(
-                    child: SingleChildScrollView(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          ...items.map(
-                            (item) => ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              leading: Container(
-                                width: 42,
-                                height: 42,
-                                decoration: BoxDecoration(
-                                  color: item.destructive
-                                      ? Colors.redAccent.withAlpha(28)
-                                      : Colors.white.withAlpha(12),
-                                  borderRadius: BorderRadius.circular(14),
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF171717),
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: Colors.white.withAlpha(14)),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Now playing',
+                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(height: 12),
+                        Flexible(
+                          child: SingleChildScrollView(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                ...items.map(
+                                  (item) => ListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    leading: Container(
+                                      width: 42,
+                                      height: 42,
+                                      decoration: BoxDecoration(
+                                        color: item.destructive
+                                            ? Colors.redAccent.withAlpha(28)
+                                            : Colors.white.withAlpha(12),
+                                        borderRadius: BorderRadius.circular(14),
+                                      ),
+                                      child: Icon(
+                                        item.icon,
+                                        color: item.destructive
+                                            ? Colors.redAccent
+                                            : Colors.white,
+                                      ),
+                                    ),
+                                    title: Text(
+                                      item.title,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w800),
+                                    ),
+                                    subtitle: Text(item.subtitle),
+                                    enabled: item.onTap != null,
+                                    onTap: item.onTap,
+                                  ),
                                 ),
-                                child: Icon(
-                                  item.icon,
-                                  color: item.destructive
-                                      ? Colors.redAccent
-                                      : Colors.white,
-                                ),
-                              ),
-                              title: Text(
-                                item.title,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w800),
-                              ),
-                              subtitle: Text(item.subtitle),
-                              enabled: item.onTap != null,
-                              onTap: item.onTap,
+                              ],
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
+                ),
               ),
             ),
           ),
@@ -551,54 +849,63 @@ class _PlayerScreenState extends State<PlayerScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        height: MediaQuery.sizeOf(context).height * 0.78,
-        margin: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: const Color(0xFF171717),
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: Colors.white.withAlpha(14)),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: FutureBuilder<LyricsResult?>(
-          future: _lyricsService.getLyrics(track),
-          builder: (context, snapshot) {
-            return Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 8, 10),
-                  child: Row(
+      builder: (ctx) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => Navigator.pop(ctx),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: GestureDetector(
+            onTap: () {},
+            child: Container(
+              height: MediaQuery.sizeOf(context).height * 0.78,
+              decoration: BoxDecoration(
+                color: const Color(0xFF171717),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.white.withAlpha(14)),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: FutureBuilder<LyricsResult?>(
+                future: _lyricsService.getLyrics(track),
+                builder: (context, snapshot) {
+                  return Column(
                     children: [
-                      const Icon(Icons.lyrics_rounded),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          track.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                          ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 8, 10),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.lyrics_rounded),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                track.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close_rounded),
+                              onPressed: () => Navigator.pop(ctx),
+                            ),
+                          ],
                         ),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.close_rounded),
-                        onPressed: () => Navigator.pop(ctx),
+                      Expanded(
+                        child: _LyricsSheetBody(
+                          result: snapshot.data,
+                          isLoading:
+                              snapshot.connectionState == ConnectionState.waiting,
+                        ),
                       ),
                     ],
-                  ),
-                ),
-                Expanded(
-                  child: _LyricsSheetBody(
-                    result: snapshot.data,
-                    isLoading:
-                        snapshot.connectionState == ConnectionState.waiting,
-                  ),
-                ),
-              ],
-            );
-          },
+                  );
+                },
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -613,63 +920,72 @@ class _PlayerScreenState extends State<PlayerScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => Material(
-        color: Colors.transparent,
-        child: Container(
-          margin: const EdgeInsets.all(14),
-          padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
-          decoration: BoxDecoration(
-            color: const Color(0xFF171717),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: Colors.white.withAlpha(14)),
-          ),
-          child: SafeArea(
-            top: false,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Save',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+      builder: (ctx) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => Navigator.pop(ctx),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: GestureDetector(
+            onTap: () {},
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF171717),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: Colors.white.withAlpha(14)),
                 ),
-                const SizedBox(height: 12),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const _SaveActionIcon(
-                    icon: Icons.music_note_rounded,
+                child: SafeArea(
+                  top: false,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Save',
+                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 12),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const _SaveActionIcon(
+                          icon: Icons.music_note_rounded,
+                        ),
+                        title: const Text(
+                          'Save current track',
+                          style: TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                        subtitle: const Text('Add it to your cached library'),
+                        onTap: () async {
+                          Navigator.pop(ctx);
+                          await playlistProvider.saveSingleTrack(track);
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('"${track.title}" saved')),
+                          );
+                        },
+                      ),
+                      if (player.queue.isNotEmpty)
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const _SaveActionIcon(
+                            icon: Icons.playlist_add_check_rounded,
+                          ),
+                          title: const Text(
+                            'Create playlist from queue',
+                            style: TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                          subtitle: Text('${player.queue.length} tracks, exportable'),
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _showCreatePlaylistDialog(context, player.queue);
+                          },
+                        ),
+                    ],
                   ),
-                  title: const Text(
-                    'Save current track',
-                    style: TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  subtitle: const Text('Add it to your cached library'),
-                  onTap: () async {
-                    Navigator.pop(ctx);
-                    await playlistProvider.saveSingleTrack(track);
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('"${track.title}" saved')),
-                    );
-                  },
                 ),
-                if (player.queue.isNotEmpty)
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const _SaveActionIcon(
-                      icon: Icons.playlist_add_check_rounded,
-                    ),
-                    title: const Text(
-                      'Create playlist from queue',
-                      style: TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                    subtitle: Text('${player.queue.length} tracks, exportable'),
-                    onTap: () {
-                      Navigator.pop(ctx);
-                      _showCreatePlaylistDialog(context, player.queue);
-                    },
-                  ),
-              ],
+              ),
             ),
           ),
         ),
@@ -984,8 +1300,15 @@ class _ModeTab extends StatelessWidget {
 
 class _InlineVideoPlayer extends StatefulWidget {
   final Track track;
+  final bool shouldPlay;
+  final ValueChanged<VideoPlayerController?>? onControllerInitialized;
 
-  const _InlineVideoPlayer({super.key, required this.track});
+  const _InlineVideoPlayer({
+    super.key,
+    required this.track,
+    this.shouldPlay = true,
+    this.onControllerInitialized,
+  });
 
   @override
   State<_InlineVideoPlayer> createState() => _InlineVideoPlayerState();
@@ -995,7 +1318,6 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> {
   VideoPlayerController? _controller;
   Future<void>? _initializeFuture;
   Timer? _ticker;
-  bool _controlsVisible = true;
   bool _isLoading = true;
   String? _playerError;
 
@@ -1008,6 +1330,7 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> {
   @override
   void dispose() {
     _ticker?.cancel();
+    widget.onControllerInitialized?.call(null);
     _controller?.dispose();
     super.dispose();
   }
@@ -1021,6 +1344,7 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> {
     try {
       final player = context.read<PlayerProvider>();
       final settings = context.read<SettingsProvider>();
+      final startPosition = player.position;
       final videoUrl = await player.getVideoUrl(
         widget.track,
         quality: settings.audioQuality,
@@ -1037,9 +1361,19 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> {
       );
       _controller = controller;
       _initializeFuture = controller.initialize().then((_) async {
-        await controller.play();
+        await controller.seekTo(startPosition);
+        if (widget.shouldPlay) {
+          await controller.play();
+        }
         if (!mounted) return;
         setState(() => _isLoading = false);
+        widget.onControllerInitialized?.call(controller);
+
+        // Ensure the audio player is paused when video starts playing!
+        final playerProvider = context.read<PlayerProvider>();
+        if (playerProvider.isPlaying) {
+          await playerProvider.togglePlayPause();
+        }
       });
       controller.addListener(_handleControllerTick);
       _ticker = Timer.periodic(const Duration(milliseconds: 450), (_) {
@@ -1062,45 +1396,17 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> {
     if (error != null && error != _playerError) {
       setState(() => _playerError = error);
     }
-  }
 
-  Future<void> _togglePlayPause() async {
-    final controller = _controller;
-    if (controller == null || !controller.value.isInitialized) return;
-    if (controller.value.isPlaying) {
-      await controller.pause();
-    } else {
-      await controller.play();
+    // Check for video completion
+    if (controller.value.isInitialized &&
+        controller.value.position >= controller.value.duration &&
+        controller.value.duration > Duration.zero &&
+        !controller.value.isPlaying &&
+        _playerError == null) {
+      controller.removeListener(_handleControllerTick);
+      final playerProvider = context.read<PlayerProvider>();
+      playerProvider.handleTrackCompletion();
     }
-    if (mounted) setState(() => _controlsVisible = true);
-  }
-
-  Future<void> _openFullscreen() async {
-    final controller = _controller;
-    if (controller == null || !controller.value.isInitialized) return;
-    final wasPlaying = controller.value.isPlaying;
-    final position = controller.value.position;
-    final videoUrl = controller.dataSource;
-    await controller.pause();
-    if (!mounted) return;
-    final newPosition = await Navigator.of(context).push<Duration>(
-      MaterialPageRoute(
-        builder: (_) => _FullscreenVideoPlayer(
-          track: widget.track,
-          videoUrl: videoUrl,
-          initialPosition: position,
-          wasPlaying: wasPlaying,
-        ),
-      ),
-    );
-    if (!mounted) return;
-    if (newPosition != null) {
-      await controller.seekTo(newPosition);
-    }
-    if (wasPlaying) {
-      await controller.play();
-    }
-    if (mounted) setState(() => _controlsVisible = true);
   }
 
   @override
@@ -1117,20 +1423,20 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> {
               _VideoSurface(controller: _controller),
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTap: () =>
-                    setState(() => _controlsVisible = !_controlsVisible),
+                onTap: () {
+                  final c = _controller;
+                  if (c != null && c.value.isInitialized) {
+                    if (c.value.isPlaying) {
+                      c.pause();
+                    } else {
+                      c.play();
+                    }
+                  }
+                },
               ),
               if (_isLoading && _playerError == null)
                 _VideoLoadingOverlay(imageUrl: widget.track.thumbnailUrl),
               if (_playerError != null) _VideoError(message: _playerError),
-              if (_playerError == null && !_isLoading)
-                _CustomVideoControls(
-                  controller: _controller,
-                  visible: _controlsVisible,
-                  compact: true,
-                  onPlayPause: _togglePlayPause,
-                  onFullscreen: _openFullscreen,
-                ),
             ],
           ),
         ),
@@ -1163,6 +1469,7 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
   bool _controlsVisible = true;
   bool _isLoading = true;
   String? _playerError;
+  Timer? _hideTimer;
 
   @override
   void initState() {
@@ -1190,6 +1497,7 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
           }
           if (!mounted) return;
           setState(() => _isLoading = false);
+          _showControlsAndResetTimer();
         })
         .catchError((e) {
           if (!mounted) return;
@@ -1205,11 +1513,31 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
 
   @override
   void dispose() {
+    _cancelHideTimer();
     _ticker?.cancel();
     _controller.dispose();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setPreferredOrientations(const [DeviceOrientation.portraitUp]);
     super.dispose();
+  }
+
+  void _showControlsAndResetTimer() {
+    _cancelHideTimer();
+    if (mounted) {
+      setState(() => _controlsVisible = true);
+    }
+    if (_controller.value.isInitialized && _controller.value.isPlaying) {
+      _hideTimer = Timer(const Duration(seconds: 3), () {
+        if (mounted) {
+          setState(() => _controlsVisible = false);
+        }
+      });
+    }
+  }
+
+  void _cancelHideTimer() {
+    _hideTimer?.cancel();
+    _hideTimer = null;
   }
 
   void _handleControllerTick() {
@@ -1226,7 +1554,7 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
     } else {
       await _controller.play();
     }
-    if (mounted) setState(() => _controlsVisible = true);
+    _showControlsAndResetTimer();
   }
 
   void _close() {
@@ -1246,8 +1574,14 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
               Center(child: _VideoSurface(controller: _controller)),
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTap: () =>
-                    setState(() => _controlsVisible = !_controlsVisible),
+                onTap: () {
+                  if (_controlsVisible) {
+                    setState(() => _controlsVisible = false);
+                    _cancelHideTimer();
+                  } else {
+                    _showControlsAndResetTimer();
+                  }
+                },
               ),
               if (_isLoading && _playerError == null)
                 _VideoLoadingOverlay(imageUrl: widget.track.thumbnailUrl),
@@ -1259,6 +1593,7 @@ class _FullscreenVideoPlayerState extends State<_FullscreenVideoPlayer> {
                   compact: false,
                   onPlayPause: _togglePlayPause,
                   onFullscreen: _close,
+                  onInteraction: _showControlsAndResetTimer,
                 ),
               Positioned(
                 top: 12,
@@ -1313,6 +1648,7 @@ class _CustomVideoControls extends StatelessWidget {
   final bool compact;
   final VoidCallback onPlayPause;
   final VoidCallback onFullscreen;
+  final VoidCallback? onInteraction;
 
   const _CustomVideoControls({
     required this.controller,
@@ -1320,6 +1656,7 @@ class _CustomVideoControls extends StatelessWidget {
     required this.compact,
     required this.onPlayPause,
     required this.onFullscreen,
+    this.onInteraction,
   });
 
   @override
@@ -1358,7 +1695,10 @@ class _CustomVideoControls extends StatelessWidget {
               Center(
                 child: IconButton(
                   tooltip: value.isPlaying ? 'Pause' : 'Play',
-                  onPressed: onPlayPause,
+                  onPressed: () {
+                    onInteraction?.call();
+                    onPlayPause();
+                  },
                   style: IconButton.styleFrom(
                     backgroundColor: Colors.white.withAlpha(235),
                     foregroundColor: Colors.black,
@@ -1378,7 +1718,10 @@ class _CustomVideoControls extends StatelessWidget {
                 right: compact ? 10 : 22,
                 child: IconButton(
                   tooltip: compact ? 'Fullscreen' : 'Exit fullscreen',
-                  onPressed: onFullscreen,
+                  onPressed: () {
+                    onInteraction?.call();
+                    onFullscreen();
+                  },
                   style: IconButton.styleFrom(
                     backgroundColor: Colors.black.withAlpha(150),
                     foregroundColor: Colors.white,
@@ -1418,6 +1761,7 @@ class _CustomVideoControls extends StatelessWidget {
                       child: Slider(
                         value: progress,
                         onChanged: (value) {
+                          onInteraction?.call();
                           final target = Duration(
                             milliseconds: (duration.inMilliseconds * value)
                                 .round(),
@@ -1737,39 +2081,119 @@ class _MoreAction {
   });
 }
 
-class _SeekWaveform extends StatelessWidget {
+class _SeekWaveform extends StatefulWidget {
   final Duration position;
   final Duration duration;
   final Duration bufferedPosition;
   final ValueChanged<Duration> onSeek;
+  final bool isPlaying;
+  final String trackId;
 
   const _SeekWaveform({
     required this.position,
     required this.duration,
     required this.bufferedPosition,
+    required this.isPlaying,
+    required this.trackId,
     required this.onSeek,
   });
 
   @override
+  State<_SeekWaveform> createState() => _SeekWaveformState();
+}
+
+class _SeekWaveformState extends State<_SeekWaveform>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late List<double> _bars;
+  late double _rippleSpeed;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+    );
+    _initTrackParams();
+    if (widget.isPlaying) {
+      _controller.repeat();
+    }
+  }
+
+  void _initTrackParams() {
+    final seed = _getHash(widget.trackId);
+    final random = _SeededRandom(seed);
+    
+    // Generate deterministic bar heights using a symmetric window envelope
+    _bars = [];
+    for (int i = 0; i < 45; i++) {
+      final progress = i / 44.0;
+      final window = math.sin(progress * math.pi);
+      final randVal = 0.2 + 0.8 * random.nextDouble();
+      _bars.add((randVal * window).clamp(0.08, 1.0));
+    }
+
+    // Generate deterministic animation settings
+    final durationMs = 1600 + (random.nextDouble() * 1400).round();
+    _controller.duration = Duration(milliseconds: durationMs);
+    _rippleSpeed = 0.25 + 0.35 * random.nextDouble();
+  }
+
+  int _getHash(String str) {
+    int hash = 0;
+    for (var i = 0; i < str.length; i++) {
+      hash = str.codeUnitAt(i) + ((hash << 5) - hash);
+    }
+    return hash;
+  }
+
+  @override
+  void didUpdateWidget(covariant _SeekWaveform oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.trackId != oldWidget.trackId) {
+      final wasPlaying = _controller.isAnimating;
+      _controller.stop();
+      _initTrackParams();
+      if (widget.isPlaying || wasPlaying) {
+        _controller.repeat();
+      }
+    } else if (widget.isPlaying != oldWidget.isPlaying) {
+      if (widget.isPlaying) {
+        _controller.repeat();
+      } else {
+        _controller.stop();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final progress = duration.inMilliseconds > 0
-        ? position.inMilliseconds / duration.inMilliseconds
+    final progress = widget.duration.inMilliseconds > 0
+        ? widget.position.inMilliseconds / widget.duration.inMilliseconds
         : 0.0;
-    final bufferProgress = duration.inMilliseconds > 0
-        ? bufferedPosition.inMilliseconds / duration.inMilliseconds
+    final bufferProgress = widget.duration.inMilliseconds > 0
+        ? widget.bufferedPosition.inMilliseconds / widget.duration.inMilliseconds
         : 0.0;
 
     void seekFromX(double x, double width) {
-      if (duration.inMilliseconds <= 0 || width <= 0) return;
+      if (widget.duration.inMilliseconds <= 0 || width <= 0) return;
       final value = (x / width).clamp(0.0, 1.0);
-      onSeek(Duration(milliseconds: (value * duration.inMilliseconds).round()));
+      widget.onSeek(
+        Duration(milliseconds: (value * widget.duration.inMilliseconds).round()),
+      );
     }
 
     return Row(
       children: [
         SizedBox(
           width: 42,
-          child: Text(formatDuration(position), style: _timeStyle),
+          child: Text(formatDuration(widget.position), style: _timeStyle),
         ),
         Expanded(
           child: LayoutBuilder(
@@ -1782,12 +2206,22 @@ class _SeekWaveform extends StatelessWidget {
                     seekFromX(details.localPosition.dx, constraints.maxWidth),
                 child: SizedBox(
                   height: 58,
-                  child: CustomPaint(
-                    size: Size(constraints.maxWidth, 58),
-                    painter: _WaveformPainter(
-                      progress: progress.clamp(0.0, 1.0),
-                      bufferProgress: bufferProgress.clamp(0.0, 1.0),
-                    ),
+                  child: AnimatedBuilder(
+                    animation: _controller,
+                    builder: (context, child) {
+                      return CustomPaint(
+                        size: Size(constraints.maxWidth, 58),
+                        painter: _WaveformPainter(
+                          progress: progress.clamp(0.0, 1.0),
+                          bufferProgress: bufferProgress.clamp(0.0, 1.0),
+                          animationValue: _controller.value,
+                          isPlaying: widget.isPlaying,
+                          activeColor: Theme.of(context).colorScheme.primary,
+                          bars: _bars,
+                          rippleSpeed: _rippleSpeed,
+                        ),
+                      );
+                    },
                   ),
                 ),
               );
@@ -1797,7 +2231,7 @@ class _SeekWaveform extends StatelessWidget {
         SizedBox(
           width: 42,
           child: Text(
-            formatDuration(duration),
+            formatDuration(widget.duration),
             textAlign: TextAlign.end,
             style: _timeStyle,
           ),
@@ -2063,66 +2497,51 @@ class _ControlButton extends StatelessWidget {
 class _WaveformPainter extends CustomPainter {
   final double progress;
   final double bufferProgress;
+  final double animationValue;
+  final bool isPlaying;
+  final Color activeColor;
+  final List<double> bars;
+  final double rippleSpeed;
 
   const _WaveformPainter({
     required this.progress,
     required this.bufferProgress,
+    required this.animationValue,
+    required this.isPlaying,
+    required this.activeColor,
+    required this.bars,
+    required this.rippleSpeed,
   });
-
-  static const _bars = [
-    0.28,
-    0.48,
-    0.38,
-    0.62,
-    0.42,
-    0.72,
-    0.34,
-    0.58,
-    0.46,
-    0.84,
-    0.36,
-    0.52,
-    0.44,
-    0.68,
-    0.92,
-    0.4,
-    0.56,
-    0.32,
-    0.74,
-    0.5,
-    0.38,
-    0.64,
-    0.46,
-    0.3,
-    0.52,
-    0.42,
-    0.6,
-    0.34,
-    0.48,
-    0.28,
-  ];
 
   @override
   void paint(Canvas canvas, Size size) {
     final activePaint = Paint()
-      ..color = Colors.white
-      ..strokeWidth = 2.2
+      ..color = activeColor
+      ..strokeWidth = 2.4
       ..strokeCap = StrokeCap.round;
     final inactivePaint = Paint()
       ..color = Colors.white.withAlpha(36)
-      ..strokeWidth = 2.2
+      ..strokeWidth = 2.4
       ..strokeCap = StrokeCap.round;
     final bufferedPaint = Paint()
       ..color = Colors.white.withAlpha(92)
-      ..strokeWidth = 2.2
+      ..strokeWidth = 2.4
       ..strokeCap = StrokeCap.round;
 
-    final step = size.width / _bars.length;
+    final step = size.width / bars.length;
     final activeWidth = size.width * progress;
     final bufferWidth = size.width * bufferProgress;
-    for (var i = 0; i < _bars.length; i++) {
+    for (var i = 0; i < bars.length; i++) {
       final x = step * i + step / 2;
-      final barHeight = size.height * _bars[i];
+      
+      // Calculate dynamic scale factor based on play state and animation
+      final phase = animationValue * 2 * math.pi;
+      final scaleFactor = isPlaying
+          ? 0.7 + 0.3 * math.sin(phase - i * rippleSpeed)
+          : 1.0;
+
+      final barHeight = size.height * bars[i] * scaleFactor;
+
       final paint = x <= activeWidth
           ? activePaint
           : x <= bufferWidth
@@ -2139,6 +2558,21 @@ class _WaveformPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _WaveformPainter oldDelegate) {
     return oldDelegate.progress != progress ||
-        oldDelegate.bufferProgress != bufferProgress;
+        oldDelegate.bufferProgress != bufferProgress ||
+        oldDelegate.animationValue != animationValue ||
+        oldDelegate.isPlaying != isPlaying ||
+        oldDelegate.activeColor != activeColor ||
+        oldDelegate.bars != bars ||
+        oldDelegate.rippleSpeed != rippleSpeed;
+  }
+}
+
+class _SeededRandom {
+  int seed;
+  _SeededRandom(this.seed);
+
+  double nextDouble() {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
   }
 }

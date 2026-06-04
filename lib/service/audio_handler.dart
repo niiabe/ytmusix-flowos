@@ -55,6 +55,16 @@ class MusicAudioHandler extends BaseAudioHandler {
   bool _crossfadeEnabled = false;
   bool _isCrossfading = false;
   Timer? _crossfadeTimer;
+  AudioServiceRepeatMode _repeatMode = AudioServiceRepeatMode.none;
+  int? _crossfadeTargetIndex;
+  bool _isHandlingCompletion = false;
+  bool _fetchingRecommendations = false;
+
+  @override
+  Future<void> setRepeatMode(AudioServiceRepeatMode repeatMode) async {
+    _repeatMode = repeatMode;
+    playbackState.add(playbackState.value.copyWith(repeatMode: repeatMode));
+  }
 
   void setRepository(AudioRepository repository) {
     _audioRepository = repository;
@@ -183,17 +193,77 @@ class MusicAudioHandler extends BaseAudioHandler {
         controls: _controls,
         systemActions: _systemActions,
         androidCompactActionIndices: [1, 0, 3],
+        repeatMode: _repeatMode,
       ),
     );
   }
 
   void _onProcessingState(ProcessingState state) {
     if (state == ProcessingState.completed) {
-      if (_currentIndex != null && _currentIndex! + 1 < _queue.length) {
-        _playNext();
-      } else {
-        stop();
+      _handlePlaybackCompleted();
+    }
+  }
+
+  Future<void> _handlePlaybackCompleted() async {
+    if (_isHandlingCompletion || _currentIndex == null || _queue.isEmpty) return;
+    _isHandlingCompletion = true;
+
+    try {
+      if (_repeatMode == AudioServiceRepeatMode.one) {
+        await _playAtIndex(_currentIndex!);
+        return;
       }
+
+      if (_currentIndex! + 1 < _queue.length) {
+        await _playAtIndex(_currentIndex! + 1);
+        return;
+      }
+
+      if (_repeatMode == AudioServiceRepeatMode.all) {
+        await _playAtIndex(0);
+        return;
+      }
+
+      await _playRecommendations();
+    } finally {
+      _isHandlingCompletion = false;
+    }
+  }
+
+  Future<void> _playRecommendations() async {
+    if (_audioRepository == null || _currentIndex == null || _queue.isEmpty) return;
+    final currentItem = _queue[_currentIndex!];
+    try {
+      final seed = Track(
+        id: currentItem.id,
+        title: currentItem.title,
+        author: currentItem.artist,
+        thumbnailUrl: currentItem.artUri?.toString(),
+        duration: currentItem.duration ?? Duration.zero,
+      );
+      final recommendations = await _audioRepository!.getRecommendations(seed);
+      final seenIds = _queue.map((item) => item.id).toSet();
+      final newItems = <MediaItem>[];
+      for (final track in recommendations) {
+        if (seenIds.add(track.id)) {
+          newItems.add(MediaItem(
+            id: track.id,
+            title: track.title,
+            artist: track.author ?? '',
+            artUri: track.thumbnailUrl != null ? Uri.tryParse(track.thumbnailUrl!) : null,
+            duration: track.duration,
+          ));
+        }
+      }
+      if (newItems.isNotEmpty) {
+        _queue.addAll(newItems);
+        queue.add(_queue);
+        await _playAtIndex(_currentIndex! + 1);
+      } else {
+        await stop();
+      }
+    } catch (_) {
+      await stop();
     }
   }
 
@@ -345,12 +415,6 @@ class MusicAudioHandler extends BaseAudioHandler {
     }
   }
 
-  Future<void> _playNext() async {
-    if (_currentIndex != null && _currentIndex! + 1 < _queue.length) {
-      await _playAtIndex(_currentIndex! + 1);
-    }
-  }
-
   Future<void> _playAtIndex(int index) async {
     if (index < 0 || index >= _queue.length) return;
     _currentIndex = index;
@@ -471,6 +535,7 @@ class MusicAudioHandler extends BaseAudioHandler {
         controls: _controls,
         systemActions: _systemActions,
         androidCompactActionIndices: [1, 0, 3],
+        repeatMode: _repeatMode,
       ),
     );
 
@@ -478,21 +543,75 @@ class MusicAudioHandler extends BaseAudioHandler {
     if (dur != null && dur.inSeconds > 7) {
       final remaining = dur - pos;
       if (_crossfadeEnabled && remaining <= const Duration(seconds: 7) && !_isCrossfading) {
-        if (_currentIndex != null && _currentIndex! + 1 < _queue.length) {
-          _startCrossfade();
-        }
+        _checkAndStartCrossfade();
       }
     }
   }
 
-  Future<void> _startCrossfade() async {
+  Future<void> _checkAndStartCrossfade() async {
+    if (_currentIndex == null || _queue.isEmpty) return;
+
+    int? nextIndex;
+    if (_repeatMode == AudioServiceRepeatMode.one) {
+      nextIndex = _currentIndex;
+    } else if (_currentIndex! + 1 < _queue.length) {
+      nextIndex = _currentIndex! + 1;
+    } else if (_repeatMode == AudioServiceRepeatMode.all) {
+      nextIndex = 0;
+    }
+
+    if (nextIndex != null) {
+      await _startCrossfade(nextIndex);
+    } else {
+      _fetchAndAppendRecommendationsForCrossfade();
+    }
+  }
+
+  Future<void> _fetchAndAppendRecommendationsForCrossfade() async {
+    if (_fetchingRecommendations || _audioRepository == null || _currentIndex == null || _queue.isEmpty) return;
+    _fetchingRecommendations = true;
+    try {
+      final currentItem = _queue[_currentIndex!];
+      final seed = Track(
+        id: currentItem.id,
+        title: currentItem.title,
+        author: currentItem.artist,
+        thumbnailUrl: currentItem.artUri?.toString(),
+        duration: currentItem.duration ?? Duration.zero,
+      );
+      final recommendations = await _audioRepository!.getRecommendations(seed);
+      final seenIds = _queue.map((item) => item.id).toSet();
+      final newItems = <MediaItem>[];
+      for (final track in recommendations) {
+        if (seenIds.add(track.id)) {
+          newItems.add(MediaItem(
+            id: track.id,
+            title: track.title,
+            artist: track.author ?? '',
+            artUri: track.thumbnailUrl != null ? Uri.tryParse(track.thumbnailUrl!) : null,
+            duration: track.duration,
+          ));
+        }
+      }
+      if (newItems.isNotEmpty) {
+        _queue.addAll(newItems);
+        queue.add(_queue);
+      }
+    } catch (_) {
+    } finally {
+      _fetchingRecommendations = false;
+    }
+  }
+
+  Future<void> _startCrossfade(int nextIndex) async {
     _isCrossfading = true;
-    final nextIndex = _currentIndex! + 1;
+    _crossfadeTargetIndex = nextIndex;
     final nextItem = _queue[nextIndex];
 
     final nextUrl = await _resolveUrlForItem(nextItem);
     if (nextUrl == null || nextUrl.isEmpty) {
       _isCrossfading = false;
+      _crossfadeTargetIndex = null;
       return;
     }
 
@@ -551,7 +670,10 @@ class MusicAudioHandler extends BaseAudioHandler {
     final inactive = _inactivePlayer;
 
     _isPlayer1Active = !_isPlayer1Active;
-    _currentIndex = _currentIndex! + 1;
+    if (_crossfadeTargetIndex != null) {
+      _currentIndex = _crossfadeTargetIndex;
+    }
+    _crossfadeTargetIndex = null;
 
     await active.stop();
     active.setVolume(1.0);

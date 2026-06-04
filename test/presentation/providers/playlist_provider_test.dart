@@ -40,6 +40,9 @@ class _FakePlaylistRepository implements PlaylistRepository {
   }
 
   @override
+  Future<List<Track>> getPodcastFeed() async => const [];
+
+  @override
   Future<void> deletePlaylist(String playlistId) async {}
 
   @override

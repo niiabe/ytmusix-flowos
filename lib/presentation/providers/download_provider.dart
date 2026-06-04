@@ -15,12 +15,14 @@ class DownloadProvider extends ChangeNotifier {
   final Set<String> _downloadingPlaylists = {};
   final Set<String> _downloadedPlaylists = {};
   final Map<String, double> _playlistDownloadProgress = {};
+  List<Track> _downloadedTracks = [];
 
   Set<String> get downloadedTrackIds => _downloadedTrackIds;
   Map<String, DownloadProgress> get activeDownloads => _activeDownloads;
   Set<String> get downloadingPlaylists => _downloadingPlaylists;
   Set<String> get downloadedPlaylists => _downloadedPlaylists;
   Map<String, double> get playlistDownloadProgress => _playlistDownloadProgress;
+  List<Track> get downloadedTracks => _downloadedTracks;
 
   StreamSubscription? _progressSub;
   StreamSubscription? _completedSub;
@@ -45,7 +47,7 @@ class DownloadProvider extends ChangeNotifier {
     _downloadedPlaylists.addAll(
       await _downloadService.getFullyDownloadedPlaylistIds(),
     );
-    notifyListeners();
+    await loadDownloadedTracks();
   }
 
   Future<void> downloadPlaylist(
@@ -190,6 +192,17 @@ class DownloadProvider extends ChangeNotifier {
     _downloadedPlaylists
       ..clear()
       ..addAll(await _downloadService.getFullyDownloadedPlaylistIds());
+  }
+
+  Future<void> loadDownloadedTracks() async {
+    _downloadedTracks = await _downloadService.getAllDownloadedTracks();
+    notifyListeners();
+  }
+
+  Future<void> deleteDownloadedTrack(String trackId) async {
+    await _downloadService.deleteDownloadedTrack(trackId);
+    await _refreshDownloadedIds();
+    await loadDownloadedTracks();
   }
 
   @override

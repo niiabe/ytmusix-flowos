@@ -437,4 +437,19 @@ class PlaylistDatabase {
     final maps = await db.query('favorite_collections', orderBy: 'favoritedAt DESC');
     return maps.map((m) => PlaylistModel.fromMap(m)).toList();
   }
+
+  Future<List<TrackModel>> getAllDownloadedTracks() async {
+    final db = await database;
+    final results = await db.query('downloaded_tracks', orderBy: 'downloadedAt DESC');
+    final resolved = <TrackModel>[];
+    for (final map in results) {
+      final newMap = Map<String, dynamic>.from(map);
+      final path = newMap['filePath'] as String?;
+      if (path != null) {
+        newMap['filePath'] = await _resolveDynamicPath(path);
+      }
+      resolved.add(TrackModel.fromMap(newMap));
+    }
+    return resolved;
+  }
 }

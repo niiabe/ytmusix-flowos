@@ -3,6 +3,7 @@ import 'dart:developer' as dev;
 import 'package:dart_ytmusic_api/dart_ytmusic_api.dart' as ytmusic;
 import 'package:youtube_explode_dart/youtube_explode_dart.dart'
     hide Playlist, Video;
+import 'package:http/http.dart' as http;
 import '../../../domain/entities/search_result_models.dart';
 import '../../models/playlist_model.dart';
 import '../../models/video_model.dart';
@@ -163,6 +164,79 @@ class YoutubeRemoteDataSource {
       thumbnailUrl: _highQualityThumbnail(video.id.value),
       index: 0,
     );
+  }
+
+  Future<List<TrackModel>> getHashtagPodcasts() async {
+    try {
+      final response = await http.get(
+        Uri.parse('https://www.youtube.com/hashtag/podcasts'),
+        headers: {
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+              'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final body = response.body;
+        final regExp = RegExp(r'"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"');
+        final matches = regExp.allMatches(body);
+        final videoIds = <String>[];
+        for (final m in matches) {
+          final id = m.group(1);
+          if (id != null && !videoIds.contains(id)) {
+            videoIds.add(id);
+          }
+        }
+        
+        if (videoIds.isNotEmpty) {
+          final tracks = <TrackModel>[];
+          final limit = videoIds.take(18).toList();
+          for (var i = 0; i < limit.length; i++) {
+            try {
+              final video = await _yt.videos.get(limit[i]).timeout(const Duration(seconds: 3));
+              tracks.add(
+                TrackModel(
+                  id: video.id.value,
+                  title: video.title,
+                  author: video.author,
+                  durationSeconds: video.duration?.inSeconds ?? 0,
+                  thumbnailUrl: _highQualityThumbnail(video.id.value),
+                  index: i,
+                ),
+              );
+            } catch (_) {}
+          }
+          if (tracks.isNotEmpty) return tracks;
+        }
+      }
+    } catch (e) {
+      dev.log('Failed to scrape podcast hashtag page: $e', name: 'YoutubeRemoteDataSource');
+    }
+
+    // Fallback: search for '#podcasts'
+    try {
+      final results = await _yt.search.search('#podcasts').timeout(_timeout);
+      final tracks = <TrackModel>[];
+      for (var i = 0; i < results.length; i++) {
+        final video = results[i];
+        tracks.add(
+          TrackModel(
+            id: video.id.value,
+            title: video.title,
+            author: video.author,
+            durationSeconds: video.duration?.inSeconds ?? 0,
+            thumbnailUrl: _highQualityThumbnail(video.id.value),
+            index: i,
+          ),
+        );
+      }
+      return tracks;
+    } catch (e) {
+      dev.log('Podcast fallback search failed: $e', name: 'YoutubeRemoteDataSource');
+      return [];
+    }
   }
 
   /// Returns the highest-quality YouTube thumbnail URL for a given video ID.
@@ -456,44 +530,67 @@ class YoutubeRemoteDataSource {
 
   Future<CategorizedSearchResults> searchAll(String query) async {
     try {
-      final results = await _ytMusic.search(query).timeout(_timeout);
+      final resultsList = await Future.wait([
+        _ytMusic.searchSongs(query).timeout(_timeout),
+        _ytMusic.searchVideos(query).timeout(_timeout),
+        _ytMusic.searchAlbums(query).timeout(_timeout),
+        _ytMusic.searchArtists(query).timeout(_timeout),
+        _ytMusic.searchPlaylists(query).timeout(_timeout),
+      ]);
+
       final songs = <TrackModel>[];
       final videos = <TrackModel>[];
       final albums = <AlbumResult>[];
       final artists = <ArtistResult>[];
       final playlists = <PlaylistResult>[];
 
-      for (final result in results) {
-        if (result is ytmusic.SongDetailed) {
-          songs.add(_trackFromSong(result, songs.length));
-        } else if (result is ytmusic.VideoDetailed) {
-          videos.add(_trackFromVideo(result, videos.length));
-        } else if (result is ytmusic.AlbumDetailed) {
+      for (final song in resultsList[0]) {
+        if (song is ytmusic.SongDetailed) {
+          songs.add(_trackFromSong(song, songs.length));
+        }
+      }
+
+      for (final video in resultsList[1]) {
+        if (video is ytmusic.VideoDetailed) {
+          videos.add(_trackFromVideo(video, videos.length));
+        }
+      }
+
+      for (final album in resultsList[2]) {
+        if (album is ytmusic.AlbumDetailed) {
           albums.add(
             AlbumResult(
-              id: result.albumId,
-              title: result.name,
-              artist: result.artist.name,
-              artistId: result.artist.artistId,
-              year: result.year,
-              thumbnailUrl: _bestThumbnail(result.thumbnails),
+              id: album.albumId,
+              title: album.name,
+              artist: album.artist.name,
+              artistId: album.artist.artistId,
+              year: album.year,
+              thumbnailUrl: _bestThumbnail(album.thumbnails),
             ),
           );
-        } else if (result is ytmusic.ArtistDetailed) {
+        }
+      }
+
+      for (final artist in resultsList[3]) {
+        if (artist is ytmusic.ArtistDetailed) {
           artists.add(
             ArtistResult(
-              id: result.artistId,
-              name: result.name,
-              thumbnailUrl: _bestThumbnail(result.thumbnails),
+              id: artist.artistId,
+              name: artist.name,
+              thumbnailUrl: _bestThumbnail(artist.thumbnails),
             ),
           );
-        } else if (result is ytmusic.PlaylistDetailed) {
+        }
+      }
+
+      for (final playlist in resultsList[4]) {
+        if (playlist is ytmusic.PlaylistDetailed) {
           playlists.add(
             PlaylistResult(
-              id: result.playlistId,
-              title: result.name,
-              artist: result.artist.name,
-              thumbnailUrl: _bestThumbnail(result.thumbnails),
+              id: playlist.playlistId,
+              title: playlist.name,
+              artist: playlist.artist.name,
+              thumbnailUrl: _bestThumbnail(playlist.thumbnails),
             ),
           );
         }

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.2
+
+- Redesigned search results screen utilizing standard TrackTile and CachedNetworkImage.
+- Removed search category results limits by parallelizing search queries.
+- Converted search tabs into pill-shaped chips with dynamic active highlights.
+- Implemented seamless position handoff and playback synchronization between audio and video modes.
+- Ensured video player auto-pauses background audio to prevent double playback sound.
+- Added auto-advance navigation progression when video playback completes.
+
 ## 1.4.1
 
 - Fixed background audio playback and track auto-play progression on Android.

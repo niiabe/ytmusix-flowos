@@ -54,7 +54,7 @@ void main() {
 
     expect(player.currentIndex, 0);
     expect(repository.playedTrackIds, ['next', 'seed']);
-    expect(repository.requestedQualities, ['medium', 'medium']);
+    expect(repository.requestedQualities, ['medium', 'medium', 'medium']);
     expect(repository.recommendationCallCount, 0);
   });
 

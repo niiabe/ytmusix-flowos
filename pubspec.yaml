@@ -1,7 +1,7 @@
 name: ytmusix
 description: YouTube Music Streamer — audio from public YouTube playlists.
 publish_to: 'none'
-version: 1.4.1+6
+version: 1.4.2+7
 
 environment:
   sdk: ^3.12.0
