@@ -289,12 +289,19 @@ class __AndroidBackgroundSettingsState
               ),
               padding: const EdgeInsets.symmetric(horizontal: 12),
             ),
-            onPressed: _isOptimized
-                ? () async {
-                    await KeepAliveService.requestDisableBatteryOptimization();
-                    Future.delayed(const Duration(seconds: 2), _checkStatus);
-                  }
-                : null,
+            onPressed: () async {
+              if (_isOptimized) {
+                await KeepAliveService.requestDisableBatteryOptimization();
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Battery optimization is already disabled. Opening system settings...'),
+                  ),
+                );
+                await KeepAliveService.requestDisableBatteryOptimization();
+              }
+              Future.delayed(const Duration(seconds: 2), _checkStatus);
+            },
             child: Text(
               _isOptimized ? 'Disable' : 'Disabled',
               style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
