@@ -430,7 +430,19 @@ class _ChartListScreenState extends State<ChartListScreen> {
 
     for (final query in queries) {
       final results = await playlistProvider.searchSilently(query);
-      if (results.isNotEmpty) return results.first;
+      if (results.isNotEmpty) {
+        final ytTrack = results.first;
+        return Track(
+          id: ytTrack.id,
+          title: item.title,
+          author: item.artist,
+          thumbnailUrl: item.artworkUrl ?? ytTrack.thumbnailUrl,
+          duration: ytTrack.duration,
+          albumId: ytTrack.albumId,
+          artistId: ytTrack.artistId,
+          index: ytTrack.index,
+        );
+      }
     }
     return null;
   }
