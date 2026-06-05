@@ -1,7 +1,7 @@
 name: ytmusix
 description: YouTube Music Streamer — audio from public YouTube playlists.
 publish_to: 'none'
-version: 1.4.2+7
+version: 1.5.0+8
 
 environment:
   sdk: ^3.12.0
@@ -13,11 +13,14 @@ dependencies:
   sqflite: ^2.4.1
   path: ^1.9.1
   youtube_explode_dart: ^3.1.0
+  dart_ytmusic_api: ^1.3.7
   just_audio: ^0.9.43
   provider: ^6.1.2
   audio_session: ^0.1.25
   cached_network_image: ^3.4.1
   shared_preferences: ^2.3.0
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
   webview_flutter: ^4.10.0
   webview_flutter_android: ^4.12.0
   audio_service: ^0.18.18
@@ -25,6 +28,7 @@ dependencies:
   flutter_secure_storage: ^9.2.4
   file_picker: ^10.0.0
   package_info_plus: ^8.0.0
+  video_player: ^2.11.1
 
 dev_dependencies:
   flutter_test:
@@ -36,6 +40,9 @@ dev_dependencies:
 flutter_launcher_icons:
   android: true
   ios: true
+  macos:
+    generate: true
+    image_path: tool/icon.png
   image_path: tool/icon.png
 
 flutter_native_splash:

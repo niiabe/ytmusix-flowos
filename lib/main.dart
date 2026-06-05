@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:audio_service/audio_service.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'app.dart';
 import 'data/datasources/local/playlist_database.dart';
 import 'data/datasources/remote/youtube_remote_datasource.dart';
@@ -14,6 +15,9 @@ import 'presentation/providers/settings_provider.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Hive.initFlutter();
+  await Hive.openBox('home_feeds');
+  await Hive.openBox('cached_playlists');
 
   try {
     final session = await AudioSession.instance;
@@ -49,6 +53,7 @@ Future<void> main() async {
         androidNotificationClickStartsActivity: true,
       ),
     );
+    audioHandler.setPlaylistRepository(playlistRepository);
 
     final audioRepository = AudioRepositoryImpl(
       remoteDataSource: remoteDataSource,

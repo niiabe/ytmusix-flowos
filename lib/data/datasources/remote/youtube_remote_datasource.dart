@@ -3,6 +3,7 @@ import 'dart:developer' as dev;
 import 'package:youtube_explode_dart/youtube_explode_dart.dart'
     hide Playlist, Video;
 import 'package:http/http.dart' as http;
+import 'package:dart_ytmusic_api/dart_ytmusic_api.dart' as ytmusic;
 import '../../../domain/entities/search_result_models.dart';
 import '../../models/playlist_model.dart';
 import '../../models/video_model.dart';
@@ -14,6 +15,7 @@ class YoutubeRemoteDataSource {
 
   final AuthService _authService;
   late final YoutubeExplode _yt;
+  late final ytmusic.YTMusic _ytMusic;
 
   YoutubeRemoteDataSource({AuthService? authService})
       : _authService = authService ?? AuthService();
@@ -410,6 +412,49 @@ class YoutubeRemoteDataSource {
     final video = await _yt.videos.get(videoId);
     final related = await _yt.videos.getRelatedVideos(video);
     final videos = related?.take(maxResults).toList() ?? [];
+    final tracks = <TrackModel>[];
+    for (var i = 0; i < videos.length; i++) {
+      final video = videos[i];
+      tracks.add(
+        TrackModel(
+          id: video.id.value,
+          title: video.title,
+          author: video.author,
+          durationSeconds: video.duration?.inSeconds ?? 0,
+          thumbnailUrl: _highQualityThumbnail(video.id.value),
+          index: i,
+        ),
+      );
+    }
+    return tracks;
+  }
+
+  Future<List<TrackModel>> search(String query) async {
+    try {
+      final songs = await _ytMusic.searchSongs(query).timeout(_timeout);
+      final videos = await _ytMusic.searchVideos(query).timeout(_timeout);
+      final seen = <String>{};
+      final tracks = <TrackModel>[];
+
+      for (final song in songs) {
+        if (song.videoId.isEmpty || !seen.add(song.videoId)) continue;
+        tracks.add(_trackFromSong(song, tracks.length));
+      }
+
+      for (final video in videos) {
+        if (video.videoId.isEmpty || !seen.add(video.videoId)) continue;
+        tracks.add(_trackFromVideo(video, tracks.length));
+      }
+
+      if (tracks.isNotEmpty) return tracks;
+    } catch (e) {
+      dev.log(
+        'YouTube Music search failed for "$query", using YouTube fallback: $e',
+        name: 'YoutubeRemoteDataSource',
+      );
+    }
+
+    final results = await _yt.search.search(query);
     final tracks = <TrackModel>[];
     for (var i = 0; i < results.length; i++) {
       final video = results[i];

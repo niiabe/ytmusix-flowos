@@ -13,6 +13,8 @@ abstract class AudioRepository {
   Future<Duration> getPosition();
   Future<Duration> getDuration();
   Future<bool> isPlaying();
+  Future<String> getVideoUrl(Track track, {String quality = 'medium'});
+  Future<List<Track>> getRecommendations(Track seed, {int limit = 20});
   Stream<ProcessingState> get processingStateStream;
   Stream<Duration> get positionStream;
   Stream<Duration> get bufferedPositionStream;

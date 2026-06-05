@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.5.0
+
+- Overhauled the Now Playing portrait layout to match Apple Music: sheet drag handle, enlarged artwork (240–330 px), bigger title/artist text, negative remaining time display, and an inline micro quality/bitrate badge.
+- Consolidated all Now Playing action controls (Lyrics, Crossfade, Auto DJ, Save, Queue) into a single premium bottom row bar.
+- Replaced skip-previous/next icons with fast-rewind/fast-forward across all player layouts and the mini-player bar.
+- Removed the filled-circle background from the play/pause button for a flat Apple Music aesthetic.
+- Enlarged secondary control icons (shuffle, repeat, skip) from 24 → 28 px for better visual weight.
+- Added Auto DJ continuation system with five modes: Library Shuffle, Similar Songs, Same Genre, Same Artist, and Smart Mix.
+- Equal-power crossfade with dynamic pitch warping during active/inactive player transitions.
+- Auto DJ mode and songs-count preference persisted to SharedPreferences; mode selector available as an interactive bottom sheet in both portrait and wide layouts.
+- Added Apple Music-style synced lyrics view with animated active-line highlight (AnimatedDefaultTextStyle), ShaderMask gradient fade at scroll edges, and 40 % viewport auto-scroll centering.
+- Hidden mini album art in portrait player when inline lyrics are showing to maximize lyrics height.
+- Fixed Recent tab routing: clicking a track now plays it directly instead of treating it as a playlist.
+- Albums on the home browse shelf now navigate directly to the AlbumScreen detail page.
+- Single-track playlists on the browse shelf now play immediately without opening the detail view.
+
 ## 1.4.2
 
 - Redesigned search results screen utilizing standard TrackTile and CachedNetworkImage.

@@ -30,6 +30,7 @@ class PlaylistDatabase {
       version: 7,
       onCreate: _createTables,
       onUpgrade: _onUpgrade,
+      onOpen: _ensureSchema,
     );
   }
 
@@ -54,6 +55,8 @@ class PlaylistDatabase {
         durationSeconds INTEGER DEFAULT 0,
         author TEXT,
         idx INTEGER DEFAULT 0,
+        albumId TEXT,
+        artistId TEXT,
         PRIMARY KEY (id, playlistId),
         FOREIGN KEY (playlistId) REFERENCES playlists(id) ON DELETE CASCADE
       )
@@ -159,6 +162,21 @@ class PlaylistDatabase {
     }
   }
 
+  Future<void> _ensureSchema(Database db) async {
+    final trackColumns = await _columnNames(db, 'tracks');
+    if (!trackColumns.contains('albumId')) {
+      await db.execute('ALTER TABLE tracks ADD COLUMN albumId TEXT');
+    }
+    if (!trackColumns.contains('artistId')) {
+      await db.execute('ALTER TABLE tracks ADD COLUMN artistId TEXT');
+    }
+  }
+
+  Future<Set<String>> _columnNames(Database db, String table) async {
+    final columns = await db.rawQuery('PRAGMA table_info($table)');
+    return columns.map((column) => column['name'] as String).toSet();
+  }
+
   Future<void> insertPlaylist(PlaylistModel playlist) async {
     final db = await database;
     final map = playlist.toMap();
@@ -166,41 +184,67 @@ class PlaylistDatabase {
       map['createdAt'] = DateTime.now().millisecondsSinceEpoch;
     }
     map.remove('type');
-    await db.insert('playlists', map,
-        conflictAlgorithm: ConflictAlgorithm.replace);
+    await db.insert(
+      'playlists',
+      map,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   Future<void> updatePlaylistTitle(String id, String newTitle) async {
     final db = await database;
-    await db.update('playlists', {'title': newTitle},
-        where: 'id = ?', whereArgs: [id]);
+    await db.update(
+      'playlists',
+      {'title': newTitle},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<void> removeTrack(String playlistId, String trackId) async {
     final db = await database;
-    await db.delete('tracks',
-        where: 'id = ? AND playlistId = ?', whereArgs: [trackId, playlistId]);
-    final remaining = await db.query('tracks',
-        where: 'playlistId = ?', whereArgs: [playlistId], orderBy: 'idx ASC');
+    await db.delete(
+      'tracks',
+      where: 'id = ? AND playlistId = ?',
+      whereArgs: [trackId, playlistId],
+    );
+    final remaining = await db.query(
+      'tracks',
+      where: 'playlistId = ?',
+      whereArgs: [playlistId],
+      orderBy: 'idx ASC',
+    );
     final batch = db.batch();
     for (var i = 0; i < remaining.length; i++) {
-      batch.update('tracks', {'idx': i},
-          where: 'id = ? AND playlistId = ?',
-          whereArgs: [remaining[i]['id'], playlistId]);
+      batch.update(
+        'tracks',
+        {'idx': i},
+        where: 'id = ? AND playlistId = ?',
+        whereArgs: [remaining[i]['id'], playlistId],
+      );
     }
     await batch.commit(noResult: true);
-    await db.update('playlists', {'videoCount': remaining.length},
-        where: 'id = ?', whereArgs: [playlistId]);
+    await db.update(
+      'playlists',
+      {'videoCount': remaining.length},
+      where: 'id = ?',
+      whereArgs: [playlistId],
+    );
   }
 
   Future<void> reorderTracks(
-      String playlistId, List<String> trackIdsInOrder) async {
+    String playlistId,
+    List<String> trackIdsInOrder,
+  ) async {
     final db = await database;
     final batch = db.batch();
     for (var i = 0; i < trackIdsInOrder.length; i++) {
-      batch.update('tracks', {'idx': i},
-          where: 'id = ? AND playlistId = ?',
-          whereArgs: [trackIdsInOrder[i], playlistId]);
+      batch.update(
+        'tracks',
+        {'idx': i},
+        where: 'id = ? AND playlistId = ?',
+        whereArgs: [trackIdsInOrder[i], playlistId],
+      );
     }
     await batch.commit(noResult: true);
   }
@@ -225,8 +269,7 @@ class PlaylistDatabase {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
-  Future<void> insertTracks(
-      String playlistId, List<TrackModel> tracks) async {
+  Future<void> insertTracks(String playlistId, List<TrackModel> tracks) async {
     final db = await database;
     final batch = db.batch();
     for (final track in tracks) {
@@ -240,16 +283,24 @@ class PlaylistDatabase {
 
   Future<List<TrackModel>> getTracks(String playlistId) async {
     final db = await database;
-    final maps = await db.query('tracks',
-        where: 'playlistId = ?',
-        whereArgs: [playlistId],
-        orderBy: 'idx ASC');
+    final maps = await db.query(
+      'tracks',
+      where: 'playlistId = ?',
+      whereArgs: [playlistId],
+      orderBy: 'idx ASC',
+    );
     return maps.map((m) => TrackModel.fromMap(m)).toList();
   }
 
   Future<void> markTrackDownloaded(
-      String trackId, String playlistId, String filePath,
-      {String title = '', String? thumbnailUrl, int durationSeconds = 0, String? author}) async {
+    String trackId,
+    String playlistId,
+    String filePath, {
+    String title = '',
+    String? thumbnailUrl,
+    int durationSeconds = 0,
+    String? author,
+  }) async {
     final db = await database;
     await db.insert('downloaded_tracks', {
       'id': trackId,
@@ -265,8 +316,12 @@ class PlaylistDatabase {
 
   Future<bool> isTrackDownloaded(String trackId) async {
     final db = await database;
-    final result = await db.query('downloaded_tracks',
-        where: 'id = ?', whereArgs: [trackId], limit: 1);
+    final result = await db.query(
+      'downloaded_tracks',
+      where: 'id = ?',
+      whereArgs: [trackId],
+      limit: 1,
+    );
     return result.isNotEmpty;
   }
 
@@ -282,18 +337,27 @@ class PlaylistDatabase {
 
   Future<String?> getDownloadedFilePath(String trackId) async {
     final db = await database;
-    final result = await db.query('downloaded_tracks',
-        where: 'id = ?', whereArgs: [trackId], limit: 1);
+    final result = await db.query(
+      'downloaded_tracks',
+      where: 'id = ?',
+      whereArgs: [trackId],
+      limit: 1,
+    );
     if (result.isEmpty) return null;
     final path = result.first['filePath'] as String?;
     if (path == null) return null;
     return _resolveDynamicPath(path);
   }
 
-  Future<List<Map<String, dynamic>>> getDownloadedTracks(String playlistId) async {
+  Future<List<Map<String, dynamic>>> getDownloadedTracks(
+    String playlistId,
+  ) async {
     final db = await database;
-    final results = await db.query('downloaded_tracks',
-        where: 'playlistId = ?', whereArgs: [playlistId]);
+    final results = await db.query(
+      'downloaded_tracks',
+      where: 'playlistId = ?',
+      whereArgs: [playlistId],
+    );
     final resolved = <Map<String, dynamic>>[];
     for (final map in results) {
       final newMap = Map<String, dynamic>.from(map);
@@ -313,9 +377,12 @@ class PlaylistDatabase {
 
   Future<List<String>> getDownloadedFilePaths(String playlistId) async {
     final db = await database;
-    final result = await db.query('downloaded_tracks',
-        columns: ['filePath'],
-        where: 'playlistId = ?', whereArgs: [playlistId]);
+    final result = await db.query(
+      'downloaded_tracks',
+      columns: ['filePath'],
+      where: 'playlistId = ?',
+      whereArgs: [playlistId],
+    );
     final paths = <String>[];
     for (final r in result) {
       final path = r['filePath'] as String?;
@@ -328,8 +395,11 @@ class PlaylistDatabase {
 
   Future<void> removeDownloadedPlaylist(String playlistId) async {
     final db = await database;
-    await db.delete('downloaded_tracks',
-        where: 'playlistId = ?', whereArgs: [playlistId]);
+    await db.delete(
+      'downloaded_tracks',
+      where: 'playlistId = ?',
+      whereArgs: [playlistId],
+    );
   }
 
   Future<Set<String>> getAllDownloadedTrackIds() async {
@@ -353,10 +423,18 @@ class PlaylistDatabase {
 
   Future<void> toggleFavoriteTrack(TrackModel track) async {
     final db = await database;
-    final existing = await db.query('favorite_tracks',
-        where: 'id = ?', whereArgs: [track.id], limit: 1);
+    final existing = await db.query(
+      'favorite_tracks',
+      where: 'id = ?',
+      whereArgs: [track.id],
+      limit: 1,
+    );
     if (existing.isNotEmpty) {
-      await db.delete('favorite_tracks', where: 'id = ?', whereArgs: [track.id]);
+      await db.delete(
+        'favorite_tracks',
+        where: 'id = ?',
+        whereArgs: [track.id],
+      );
     } else {
       await db.insert('favorite_tracks', {
         'id': track.id,
@@ -371,8 +449,12 @@ class PlaylistDatabase {
 
   Future<bool> isTrackFavorite(String trackId) async {
     final db = await database;
-    final result = await db.query('favorite_tracks',
-        where: 'id = ?', whereArgs: [trackId], limit: 1);
+    final result = await db.query(
+      'favorite_tracks',
+      where: 'id = ?',
+      whereArgs: [trackId],
+      limit: 1,
+    );
     return result.isNotEmpty;
   }
 
@@ -399,12 +481,23 @@ class PlaylistDatabase {
     return tracks;
   }
 
-  Future<void> toggleFavoriteCollection(PlaylistModel playlist, String type) async {
+  Future<void> toggleFavoriteCollection(
+    PlaylistModel playlist,
+    String type,
+  ) async {
     final db = await database;
-    final existing = await db.query('favorite_collections',
-        where: 'id = ?', whereArgs: [playlist.id], limit: 1);
+    final existing = await db.query(
+      'favorite_collections',
+      where: 'id = ?',
+      whereArgs: [playlist.id],
+      limit: 1,
+    );
     if (existing.isNotEmpty) {
-      await db.delete('favorite_collections', where: 'id = ?', whereArgs: [playlist.id]);
+      await db.delete(
+        'favorite_collections',
+        where: 'id = ?',
+        whereArgs: [playlist.id],
+      );
     } else {
       await db.insert('favorite_collections', {
         'id': playlist.id,
@@ -421,8 +514,12 @@ class PlaylistDatabase {
 
   Future<bool> isCollectionFavorite(String collectionId) async {
     final db = await database;
-    final result = await db.query('favorite_collections',
-        where: 'id = ?', whereArgs: [collectionId], limit: 1);
+    final result = await db.query(
+      'favorite_collections',
+      where: 'id = ?',
+      whereArgs: [collectionId],
+      limit: 1,
+    );
     return result.isNotEmpty;
   }
 
@@ -434,13 +531,19 @@ class PlaylistDatabase {
 
   Future<List<PlaylistModel>> getFavoriteCollections() async {
     final db = await database;
-    final maps = await db.query('favorite_collections', orderBy: 'favoritedAt DESC');
+    final maps = await db.query(
+      'favorite_collections',
+      orderBy: 'favoritedAt DESC',
+    );
     return maps.map((m) => PlaylistModel.fromMap(m)).toList();
   }
 
   Future<List<TrackModel>> getAllDownloadedTracks() async {
     final db = await database;
-    final results = await db.query('downloaded_tracks', orderBy: 'downloadedAt DESC');
+    final results = await db.query(
+      'downloaded_tracks',
+      orderBy: 'downloadedAt DESC',
+    );
     final resolved = <TrackModel>[];
     for (final map in results) {
       final newMap = Map<String, dynamic>.from(map);

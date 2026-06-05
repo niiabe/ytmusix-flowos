@@ -115,6 +115,10 @@ class _ChangelogSection extends StatelessWidget {
 
   static const _items = [
     (
+      '1.5.0',
+      'Apple Music–style Now Playing overhaul: sheet drag handle, enlarged artwork, bigger title/artist text, negative remaining-time display, and a micro quality/bitrate badge. All action controls (Lyrics, Crossfade, Auto DJ, Save, Queue) consolidated into a single bottom bar. Replaced skip icons with fast-rewind/forward; removed filled-circle play/pause for a flat aesthetic; enlarged secondary control icons to 28 px. Added Auto DJ with five modes (Library Shuffle, Similar Songs, Same Genre, Same Artist, Smart Mix), equal-power crossfade with pitch warping, and persisted mode selection. Apple Music–style synced lyrics with animated active-line highlight, ShaderMask fade edges, and auto-scroll centering. Fixed Recent tab single-track routing, album browse navigation, and single-track playlist direct playback.',
+    ),
+    (
       '1.4.2',
       'Redesigned the search screen with category-specific parallel searches, standard track tiles, cached network images, and pill-shaped chips. Implemented seamless progress switching between audio and video modes with automatic background audio pausing and video end-progression. Fixed bottom layout overflow on the Now Playing FAB, corrected repeat and shuffle controls, and resolved seekbar duration filling issues.',
     ),

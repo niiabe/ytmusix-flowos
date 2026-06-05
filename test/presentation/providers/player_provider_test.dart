@@ -131,6 +131,11 @@ class FakeAudioRepository implements AudioRepository {
   }
 
   @override
+  Future<List<Track>> getRelatedVideos(Track track) async {
+    return [];
+  }
+
+  @override
   Future<void> playTrack(Track track, String audioUrl) async {
     playedTrackIds.add(track.id);
     playing = true;

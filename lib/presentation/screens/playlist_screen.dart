@@ -49,13 +49,11 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
       player.addTrackChangedListener(_trackChangedHandler!);
       
       final provider = context.read<PlaylistProvider>();
-      provider.loadCachedPlaylist(widget.playlist.id).then((_) {
-        if (!mounted) return;
-        final current = provider.currentPlaylist;
-        if ((current == null || current.tracks.isEmpty) && !provider.isLoading) {
-          provider.fetchPlaylist(widget.playlist.id);
-        }
-      });
+      provider.loadCachedPlaylist(widget.playlist.id);
+      final current = provider.currentPlaylist;
+      if ((current == null || current.tracks.isEmpty) && !provider.isLoading) {
+        provider.fetchPlaylist(widget.playlist.id);
+      }
     });
   }
 
@@ -84,209 +82,432 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
               isPlaying: player.isPlaying,
             )
           : null,
-      body: SafeArea(
-        child: Consumer3<PlaylistProvider, PlayerProvider, DownloadProvider>(
-          builder:
-              (context, playlistProvider, playerProvider, downloadProvider, _) {
-                final playlist =
-                    playlistProvider.currentPlaylist?.id == widget.playlist.id
-                    ? playlistProvider.currentPlaylist!
-                    : widget.playlist;
-                final tracks = playlist.tracks;
-                final currentTrackId = playerProvider.currentTrack?.id;
-                final isDownloading = downloadProvider.isDownloadingPlaylist(
-                  widget.playlist.id,
+      body: Consumer3<PlaylistProvider, PlayerProvider, DownloadProvider>(
+        builder:
+            (context, playlistProvider, playerProvider, downloadProvider, _) {
+          final playlist =
+              playlistProvider.currentPlaylist?.id == widget.playlist.id
+              ? playlistProvider.currentPlaylist!
+              : widget.playlist;
+          final tracks = playlist.tracks;
+          final currentTrackId = playerProvider.currentTrack?.id;
+          final isDownloading = downloadProvider.isDownloadingPlaylist(
+            widget.playlist.id,
+          );
+          final favoriteIds = playlistProvider.favoriteIds;
+
+          if (widget.autoDownload &&
+              !_autoDownloadStarted &&
+              tracks.isNotEmpty &&
+              !isDownloading) {
+            _autoDownloadStarted = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                final quality = context
+                    .read<SettingsProvider>()
+                    .audioQuality;
+                context.read<DownloadProvider>().downloadPlaylist(
+                  playlist,
+                  quality: quality.name,
                 );
-                final favoriteIds = playlistProvider.favoriteIds;
+              }
+            });
+          }
 
-                if (widget.autoDownload &&
-                    !_autoDownloadStarted &&
-                    tracks.isNotEmpty &&
-                    !isDownloading) {
-                  _autoDownloadStarted = true;
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (mounted) {
-                      final quality = context
-                          .read<SettingsProvider>()
-                          .audioQuality;
-                      context.read<DownloadProvider>().downloadPlaylist(
-                        playlist,
-                        quality: quality.name,
-                      );
-                    }
-                  });
-                }
+          final statusBarHeight = MediaQuery.of(context).padding.top;
+          final isFullyDownloaded =
+              tracks.isNotEmpty &&
+              tracks.every((t) => downloadProvider.downloadedTrackIds.contains(t.id));
+          final anyDownloaded = tracks.any(
+            (t) => downloadProvider.downloadedTrackIds.contains(t.id),
+          );
+          final isFav = playlistProvider.isCollectionFavorite(playlist.id);
 
-                return Column(
-                  children: [
-                    _buildHeader(
-                      context,
-                      playlist,
-                      tracks,
-                      playerProvider,
-                      downloadProvider,
-                      isDownloading,
-                      playlistProvider,
-                    ),
-                    if (isDownloading)
-                      _buildDownloadProgress(downloadProvider, tracks),
-                    Expanded(
-                      child: playlistProvider.isLoading
-                          ? const Center(child: CircularProgressIndicator())
-                          : tracks.isEmpty
-                              ? const Center(child: Text('No tracks found'))
-                              : RefreshIndicator(
-                              onRefresh: () async {
-                                final provider = context
-                                    .read<PlaylistProvider>();
-                                await provider.fetchPlaylist(
-                                  widget.playlist.id,
-                                );
-                              },
-                              child: ReorderableListView.builder(
-                                padding: const EdgeInsets.fromLTRB(
-                                  14,
-                                  0,
-                                  14,
-                                  12,
+          return RefreshIndicator(
+            onRefresh: () async {
+              final provider = context.read<PlaylistProvider>();
+              await provider.fetchPlaylist(widget.playlist.id);
+            },
+            child: CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Stack(
+                    children: [
+                      Container(
+                        height: 380,
+                        width: double.infinity,
+                        foregroundDecoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.transparent,
+                              Colors.black87,
+                            ],
+                          ),
+                        ),
+                        child: Image.network(
+                          playlist.thumbnailUrl ?? '',
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, e, s) => Container(
+                            color: const Color(0xFF282828),
+                            child: const Icon(Icons.music_note_rounded, size: 64, color: Colors.white24),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        top: statusBarHeight + 12,
+                        left: 20,
+                        right: 20,
+                        child: Row(
+                          children: [
+                            Container(
+                              decoration: const BoxDecoration(
+                                color: Colors.black45,
+                                shape: BoxShape.circle,
+                              ),
+                              child: IconButton(
+                                icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: Colors.white),
+                                onPressed: () => Navigator.pop(context),
+                              ),
+                            ),
+                            const Spacer(),
+                            Container(
+                              decoration: const BoxDecoration(
+                                color: Colors.black45,
+                                shape: BoxShape.circle,
+                              ),
+                              child: IconButton(
+                                icon: Icon(
+                                  isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                                  color: isFav ? Colors.redAccent : Colors.white,
+                                  size: 20,
                                 ),
-                                onReorderItem: (oldIndex, newIndex) {
-                                  final updatedTracks = List<Track>.from(
-                                    tracks,
-                                  );
-                                  final item = updatedTracks.removeAt(oldIndex);
-                                  updatedTracks.insert(newIndex, item);
-                                  playerProvider.setQueue(
-                                    updatedTracks,
-                                    startIndex: playerProvider.currentIndex,
-                                    playlistId: widget.playlist.id,
-                                  );
-                                  final trackIds = updatedTracks
-                                      .map((t) => t.id)
-                                      .toList();
-                                  playlistProvider.reorderTracks(
-                                    widget.playlist.id,
-                                    trackIds,
-                                  );
-                                },
-                                itemCount: tracks.length,
-                                itemBuilder: (context, index) {
-                                  final track = tracks[index];
-                                  return Dismissible(
-                                    key: ValueKey(
-                                      '${track.id}-${widget.playlist.id}',
-                                    ),
-                                    direction: DismissDirection.endToStart,
-                                    confirmDismiss: (_) async {
+                                tooltip: isFav ? 'Remove from favorites' : 'Add to favorites',
+                                onPressed: () => playlistProvider.toggleFavoriteCollection(
+                                  playlist,
+                                  'playlist',
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              decoration: const BoxDecoration(
+                                color: Colors.black45,
+                                shape: BoxShape.circle,
+                              ),
+                              child: IconButton(
+                                icon: const Icon(Icons.edit_rounded, size: 20, color: Colors.white),
+                                tooltip: 'Rename',
+                                onPressed: () => _showRenameDialog(
+                                  context,
+                                  playlist.id,
+                                  playlist.title,
+                                  playlistProvider,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.black45,
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: const Text(
+                                'Playlist',
+                                style: TextStyle(fontSize: 12, color: Colors.white70, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Positioned(
+                        bottom: 24,
+                        left: 24,
+                        right: 24,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              playlist.title,
+                              style: const TextStyle(
+                                  fontSize: 26,
+                                  fontWeight: FontWeight.w900,
+                                  color: Colors.white,
+                                  shadows: [
+                                    Shadow(color: Colors.black45, blurRadius: 8, offset: Offset(0, 3)),
+                                  ]),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              '${tracks.length} tracks${playlist.author != null ? ' · ${playlist.author}' : ''}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                shadows: [
+                                  Shadow(color: Colors.black45, blurRadius: 4, offset: Offset(0, 1)),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            Row(
+                              children: [
+                                _PlayPauseButton(
+                                  tracks: tracks,
+                                  playerProvider: playerProvider,
+                                  playlistId: widget.playlist.id,
+                                ),
+                                const SizedBox(width: 12),
+                                if (tracks.isNotEmpty)
+                                  _HeaderActionButton(
+                                    icon: Icons.shuffle_rounded,
+                                    onPressed: () {
+                                      final quality = context
+                                          .read<SettingsProvider>()
+                                          .audioQuality;
+                                      playerProvider.setQueue(
+                                        tracks,
+                                        startIndex: 0,
+                                        playlistId: widget.playlist.id,
+                                      );
+                                      playerProvider.toggleShuffle();
+                                      playerProvider.playTrack(tracks.first, quality: quality);
+                                    },
+                                  ),
+                                const Spacer(),
+                                if (anyDownloaded) ...[
+                                  _HeaderActionButton(
+                                    icon: Icons.delete_sweep_rounded,
+                                    tooltip: 'Clear downloads',
+                                    onPressed: () async {
                                       final confirmed = await showDialog<bool>(
                                         context: context,
                                         builder: (ctx) => AlertDialog(
-                                          title: const Text('Remove track'),
-                                          content: Text(
-                                            'Remove "${track.title}" from this playlist?',
+                                          title: const Text('Clear downloaded tracks?'),
+                                          content: const Text(
+                                            'Remove all downloaded files for this playlist?',
                                           ),
                                           actions: [
                                             TextButton(
-                                              onPressed: () =>
-                                                  Navigator.pop(ctx, false),
+                                              onPressed: () => Navigator.pop(ctx, false),
                                               child: const Text('Cancel'),
                                             ),
                                             TextButton(
-                                              onPressed: () =>
-                                                  Navigator.pop(ctx, true),
+                                              onPressed: () => Navigator.pop(ctx, true),
                                               child: const Text(
-                                                'Remove',
-                                                style: TextStyle(
-                                                  color: Colors.red,
-                                                ),
+                                                'Clear',
+                                                style: TextStyle(color: Colors.red),
                                               ),
                                             ),
                                           ],
                                         ),
                                       );
-                                      if (confirmed == true) {
-                                        playlistProvider
-                                            .removeTrackFromPlaylist(
-                                              widget.playlist.id,
-                                              track.id,
-                                            );
+                                      if (confirmed == true && context.mounted) {
+                                        await downloadProvider.deleteDownloadedPlaylist(
+                                          widget.playlist.id,
+                                        );
                                       }
-                                      return false;
                                     },
-                                    background: Container(
-                                      alignment: Alignment.centerRight,
-                                      padding: const EdgeInsets.only(right: 24),
-                                      color: Colors.red,
-                                      child: const Icon(
-                                        Icons.delete,
-                                        color: Colors.white,
+                                  ),
+                                  const SizedBox(width: 8),
+                                ],
+                                if (isDownloading)
+                                  _HeaderActionButton(
+                                    icon: Icons.cancel_rounded,
+                                    color: Colors.redAccent,
+                                    onPressed: () => downloadProvider.cancelDownload(),
+                                  )
+                                else
+                                  _HeaderActionButton(
+                                    icon: isFullyDownloaded
+                                        ? Icons.offline_pin_rounded
+                                        : Icons.download_rounded,
+                                    color: isFullyDownloaded ? Colors.greenAccent : null,
+                                    onPressed: tracks.isEmpty || isFullyDownloaded
+                                        ? null
+                                        : () {
+                                            final quality = context
+                                                .read<SettingsProvider>()
+                                                .audioQuality;
+                                            downloadProvider.downloadPlaylist(
+                                              playlist,
+                                              quality: quality.name,
+                                            );
+                                          },
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (isDownloading)
+                  SliverToBoxAdapter(
+                    child: _buildDownloadProgress(downloadProvider, tracks),
+                  ),
+                if (playlistProvider.isLoading)
+                  const SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                else if (tracks.isEmpty)
+                  const SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: Center(child: Text('No tracks found')),
+                  )
+                else
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 80),
+                    sliver: SliverToBoxAdapter(
+                      child: ReorderableListView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        padding: EdgeInsets.zero,
+                        onReorderItem: (oldIndex, newIndex) {
+                          final updatedTracks = List<Track>.from(
+                            tracks,
+                          );
+                          final item = updatedTracks.removeAt(oldIndex);
+                          updatedTracks.insert(newIndex, item);
+                          playerProvider.setQueue(
+                            updatedTracks,
+                            startIndex: playerProvider.currentIndex,
+                            playlistId: widget.playlist.id,
+                          );
+                          final trackIds = updatedTracks
+                              .map((t) => t.id)
+                              .toList();
+                          playlistProvider.reorderTracks(
+                            widget.playlist.id,
+                            trackIds,
+                          );
+                        },
+                        itemCount: tracks.length,
+                        itemBuilder: (context, index) {
+                          final track = tracks[index];
+                          return Dismissible(
+                            key: ValueKey(
+                              '${track.id}-${widget.playlist.id}',
+                            ),
+                            direction: DismissDirection.endToStart,
+                            confirmDismiss: (_) async {
+                              final confirmed = await showDialog<bool>(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  title: const Text('Remove track'),
+                                  content: Text(
+                                    'Remove "${track.title}" from this playlist?',
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(ctx, false),
+                                      child: const Text('Cancel'),
+                                    ),
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(ctx, true),
+                                      child: const Text(
+                                        'Remove',
+                                        style: TextStyle(
+                                          color: Colors.red,
+                                        ),
                                       ),
                                     ),
-                                    child: TrackTile(
-                                      track: track,
-                                      isCurrent: currentTrackId == track.id,
-                                      isDownloaded: downloadProvider
-                                          .downloadedTrackIds
-                                          .contains(track.id),
-                                      isDownloading: downloadProvider
-                                          .activeDownloads
-                                          .containsKey(track.id),
-                                      isFavorite: favoriteIds.contains(
-                                        track.id,
-                                      ),
-                                      onDownload:
-                                          downloadProvider.downloadedTrackIds
-                                              .contains(track.id)
-                                          ? null
-                                          : () {
-                                              final quality = context
-                                                  .read<SettingsProvider>()
-                                                  .audioQuality;
-                                              downloadProvider.downloadTrack(
-                                                track,
-                                                widget.playlist.id,
-                                                quality: quality.name,
-                                              );
-                                            },
-                                      onToggleFavorite: () => playlistProvider
-                                          .toggleFavorite(track),
-                                      onMore: () => showTrackActionSheet(
-                                        context,
-                                        track: track,
-                                        queue: tracks,
-                                        index: index,
-                                        playlistId: widget.playlist.id,
-                                        onRemove: () => playlistProvider
-                                            .removeTrackFromPlaylist(
-                                              widget.playlist.id,
-                                              track.id,
-                                            ),
-                                      ),
-                                      onTap: () {
-                                        final quality = context
-                                            .read<SettingsProvider>()
-                                            .audioQuality;
-                                        playerProvider.setQueue(
-                                          tracks,
-                                          startIndex: index,
-                                          playlistId: widget.playlist.id,
-                                        );
-                                        playerProvider.playTrack(
-                                          track,
-                                          quality: quality,
-                                        );
-                                      },
-                                    ),
-                                  );
-                                },
+                                  ],
+                                ),
+                              );
+                              if (confirmed == true) {
+                                playlistProvider
+                                    .removeTrackFromPlaylist(
+                                      widget.playlist.id,
+                                      track.id,
+                                    );
+                              }
+                              return false;
+                            },
+                            background: Container(
+                              alignment: Alignment.centerRight,
+                              padding: const EdgeInsets.only(right: 24),
+                              color: Colors.red,
+                              child: const Icon(
+                                Icons.delete,
+                                color: Colors.white,
                               ),
                             ),
+                            child: TrackTile(
+                              key: ValueKey('track_${track.id}_$index'),
+                              track: track,
+                              isCurrent: currentTrackId == track.id,
+                              isDownloaded: downloadProvider
+                                  .downloadedTrackIds
+                                  .contains(track.id),
+                              isDownloading: downloadProvider
+                                  .activeDownloads
+                                  .containsKey(track.id),
+                              isFavorite: favoriteIds.contains(
+                                track.id,
+                              ),
+                              onDownload:
+                                  downloadProvider.downloadedTrackIds
+                                      .contains(track.id)
+                                  ? null
+                                  : () {
+                                      final quality = context
+                                          .read<SettingsProvider>()
+                                          .audioQuality;
+                                      downloadProvider.downloadTrack(
+                                        track,
+                                        widget.playlist.id,
+                                        quality: quality.name,
+                                      );
+                                    },
+                              onToggleFavorite: () => playlistProvider
+                                  .toggleFavorite(track),
+                              onMore: () => showTrackActionSheet(
+                                context,
+                                track: track,
+                                queue: tracks,
+                                index: index,
+                                playlistId: widget.playlist.id,
+                                onRemove: () => playlistProvider
+                                    .removeTrackFromPlaylist(
+                                      widget.playlist.id,
+                                      track.id,
+                                    ),
+                              ),
+                              onTap: () {
+                                final quality = context
+                                    .read<SettingsProvider>()
+                                    .audioQuality;
+                                playerProvider.setQueue(
+                                  tracks,
+                                  startIndex: index,
+                                  playlistId: widget.playlist.id,
+                                );
+                                playerProvider.playTrack(
+                                  track,
+                                  quality: quality,
+                                );
+                              },
+                            ),
+                          );
+                        },
+                      ),
                     ),
-
-                  ],
-                );
-              },
-        ),
+                  ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -329,209 +550,6 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildHeader(
-    BuildContext context,
-    Playlist playlist,
-    List<Track> tracks,
-    PlayerProvider playerProvider,
-    DownloadProvider downloadProvider,
-    bool isDownloading,
-    PlaylistProvider playlistProvider,
-  ) {
-    final isFullyDownloaded =
-        tracks.isNotEmpty &&
-        tracks.every((t) => downloadProvider.downloadedTrackIds.contains(t.id));
-    final anyDownloaded = tracks.any(
-      (t) => downloadProvider.downloadedTrackIds.contains(t.id),
-    );
-    final isFav = playlistProvider.isCollectionFavorite(playlist.id);
-    return Container(
-      margin: const EdgeInsets.fromLTRB(20, 12, 20, 18),
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: const Color(0xFF171717),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white.withAlpha(14)),
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              SizedBox(
-                width: 40,
-                height: 40,
-                child: IconButton(
-                  style: IconButton.styleFrom(
-                    backgroundColor: Colors.white.withAlpha(10),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
-                  onPressed: () => Navigator.pop(context),
-                ),
-              ),
-              const Spacer(),
-              IconButton(
-                icon: Icon(
-                  isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                  color: isFav ? Colors.redAccent : Colors.white,
-                  size: 20,
-                ),
-                tooltip: isFav ? 'Remove from favorites' : 'Add to favorites',
-                onPressed: () => playlistProvider.toggleFavoriteCollection(
-                  playlist,
-                  'playlist',
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.edit_rounded, size: 20),
-                tooltip: 'Rename',
-                onPressed: () => _showRenameDialog(
-                  context,
-                  playlist.id,
-                  playlist.title,
-                  playlistProvider,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(18),
-                child: Image.network(
-                  widget.playlist.thumbnailUrl ?? '',
-                  width: 112,
-                  height: 112,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, e, s) => Container(
-                    width: 112,
-                    height: 112,
-                    color: const Color(0xFF282828),
-                    child: const Icon(Icons.music_note_rounded),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      widget.playlist.title,
-                      style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${tracks.length} tracks${playlist.author != null ? ' · ${playlist.author}' : ''}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white54),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Row(
-            children: [
-              _PlayPauseButton(
-                tracks: tracks,
-                playerProvider: playerProvider,
-                playlistId: widget.playlist.id,
-              ),
-              const SizedBox(width: 8),
-              if (tracks.isNotEmpty)
-                _HeaderActionButton(
-                  icon: Icons.shuffle_rounded,
-                  onPressed: () {
-                    final quality = context
-                        .read<SettingsProvider>()
-                        .audioQuality;
-                    playerProvider.setQueue(
-                      tracks,
-                      startIndex: 0,
-                      playlistId: widget.playlist.id,
-                    );
-                    playerProvider.toggleShuffle();
-                    playerProvider.playTrack(tracks.first, quality: quality);
-                  },
-                ),
-              const Spacer(),
-              if (anyDownloaded)
-                _HeaderActionButton(
-                  icon: Icons.delete_sweep_rounded,
-                  tooltip: 'Clear downloads',
-                  onPressed: () async {
-                    final confirmed = await showDialog<bool>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text('Clear downloaded tracks?'),
-                        content: const Text(
-                          'Remove all downloaded files for this playlist?',
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(ctx, false),
-                            child: const Text('Cancel'),
-                          ),
-                          TextButton(
-                            onPressed: () => Navigator.pop(ctx, true),
-                            child: const Text(
-                              'Clear',
-                              style: TextStyle(color: Colors.red),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                    if (confirmed == true && context.mounted) {
-                      await downloadProvider.deleteDownloadedPlaylist(
-                        widget.playlist.id,
-                      );
-                    }
-                  },
-                ),
-              if (isDownloading)
-                _HeaderActionButton(
-                  icon: Icons.cancel_rounded,
-                  color: Colors.redAccent,
-                  onPressed: () => downloadProvider.cancelDownload(),
-                )
-              else
-                _HeaderActionButton(
-                  icon: isFullyDownloaded
-                      ? Icons.offline_pin_rounded
-                      : Icons.download_rounded,
-                  color: isFullyDownloaded ? Colors.greenAccent : null,
-                  onPressed: tracks.isEmpty || isFullyDownloaded
-                      ? null
-                      : () {
-                          final quality = context
-                              .read<SettingsProvider>()
-                              .audioQuality;
-                          downloadProvider.downloadPlaylist(
-                            playlist,
-                            quality: quality.name,
-                          );
-                        },
-                ),
-            ],
-          ),
-        ],
-      ),
     );
   }
 

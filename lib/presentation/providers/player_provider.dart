@@ -44,6 +44,7 @@ class PlayerProvider extends ChangeNotifier {
         _currentTrack = _queue[index];
         _position = Duration.zero;
         _duration = item.duration ?? _currentTrack!.duration;
+        _persistPlayerState();
         notifyListeners();
         for (final cb in _trackChangedListeners) {
           cb();
@@ -60,6 +61,7 @@ class PlayerProvider extends ChangeNotifier {
   bool _isLoading = false;
   bool _shuffleMode = false;
   bool _isAutoplaying = false;
+  AudioQuality _lastPlaybackQuality = AudioQuality.low;
   repeat.PlaybackRepeatMode _repeatMode = repeat.PlaybackRepeatMode.none;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
@@ -84,6 +86,7 @@ class PlayerProvider extends ChangeNotifier {
   /// Preloaded stream URL cache. Key = track.id, value = resolved URL.
   final Map<String, String> _urlCache = {};
   bool _isPrebuffering = false;
+  int _lastSavedPositionSeconds = -1;
 
   final List<VoidCallback> _trackChangedListeners = [];
 
@@ -103,6 +106,29 @@ class PlayerProvider extends ChangeNotifier {
 
   Future<void> loadRecentlyPlayed() async {
     final prefs = await SharedPreferences.getInstance();
+    try {
+      final trackJson = prefs.getString('last_track');
+      final queueJson = prefs.getString('last_queue');
+      if (trackJson != null && queueJson != null) {
+        final trackMap = jsonDecode(trackJson) as Map<String, dynamic>;
+        final queueList = jsonDecode(queueJson) as List<dynamic>;
+
+        _currentTrack = _trackFromMap(trackMap);
+        _queue = queueList.map((e) => _trackFromMap(e as Map<String, dynamic>)).toList();
+        _currentIndex = prefs.getInt('last_index') ?? 0;
+        final posSec = prefs.getInt('last_position') ?? 0;
+        _position = Duration(seconds: posSec);
+        _lastSavedPositionSeconds = posSec;
+        _duration = _currentTrack!.duration;
+        _currentPlaylistId = prefs.getString('last_playlist_id');
+
+        _syncQueueToHandler();
+        if (_audioHandler != null) {
+          _audioHandler!.mediaItem.add(_trackToMediaItem(_currentTrack!));
+        }
+      }
+    } catch (_) {}
+
     final json = prefs.getString(_recentlyPlayedKey);
     if (json == null) return;
     try {
@@ -118,6 +144,7 @@ class PlayerProvider extends ChangeNotifier {
         );
       }).toList();
     } catch (_) {}
+    notifyListeners();
   }
 
   Future<void> _addToRecentlyPlayed(Track track) async {
@@ -161,6 +188,7 @@ class PlayerProvider extends ChangeNotifier {
       if (index < _currentIndex) _currentIndex--;
     }
     _syncQueueToHandler();
+    _persistPlayerState();
     notifyListeners();
   }
 
@@ -179,6 +207,7 @@ class PlayerProvider extends ChangeNotifier {
       }
     }
     _syncQueueToHandler();
+    _persistPlayerState();
     notifyListeners();
   }
 
@@ -207,6 +236,7 @@ class PlayerProvider extends ChangeNotifier {
     _shuffleMode = false;
     _error = null;
     _syncQueueToHandler();
+    _persistPlayerState();
     notifyListeners();
   }
 
@@ -236,6 +266,7 @@ class PlayerProvider extends ChangeNotifier {
       _shuffleMode = true;
     }
     _syncQueueToHandler();
+    _persistPlayerState();
     notifyListeners();
   }
 
@@ -288,11 +319,13 @@ class PlayerProvider extends ChangeNotifier {
     Track track, {
     AudioQuality quality = AudioQuality.low,
   }) async {
+    _lastPlaybackQuality = quality;
     _isLoading = true;
     _error = null;
     _currentTrack = track;
     _position = Duration.zero;
     _duration = track.duration;
+    _persistPlayerState();
     _stopPolling();
     notifyListeners();
  
@@ -360,10 +393,14 @@ class PlayerProvider extends ChangeNotifier {
   Future<String> getVideoUrl(
     Track track, {
     AudioQuality quality = AudioQuality.low,
-  }) async {
+  }) {
+    return _audioRepository.getVideoUrl(track, quality: quality.name);
+  }
+
+  Future<void> playFromQueue(int index, {AudioQuality? quality}) async {
     if (index < 0 || index >= _queue.length) return;
     _currentIndex = index;
-    await playTrack(_queue[index], quality: quality);
+    await playTrack(_queue[index], quality: quality ?? _lastPlaybackQuality);
   }
 
   Future<void> togglePlayPause() async {
@@ -372,8 +409,18 @@ class PlayerProvider extends ChangeNotifier {
         await _audioRepository.pause();
         _isPlaying = false;
       } else {
-        await _audioRepository.resume();
-        _isPlaying = true;
+        final handlerState = _audioHandler?.playbackState.value.processingState;
+        if (handlerState == AudioProcessingState.idle && _currentTrack != null) {
+          final quality = _settingsProvider?.audioQuality ?? AudioQuality.low;
+          final savedPos = _position;
+          await playTrack(_currentTrack!, quality: quality);
+          if (savedPos > Duration.zero) {
+            await seekTo(savedPos);
+          }
+        } else {
+          await _audioRepository.resume();
+          _isPlaying = true;
+        }
       }
       notifyListeners();
     } catch (e) {
@@ -385,6 +432,8 @@ class PlayerProvider extends ChangeNotifier {
   Future<void> seekTo(Duration position) async {
     final previous = _position;
     _position = position;
+    _lastSavedPositionSeconds = position.inSeconds;
+    _persistPosition(position);
     notifyListeners();
     try {
       await _audioRepository.seek(position);
@@ -421,6 +470,11 @@ class PlayerProvider extends ChangeNotifier {
     _bufferedPositionSub?.cancel();
     _positionSub = _audioRepository.positionStream.listen((pos) {
       _position = pos;
+      final sec = pos.inSeconds;
+      if ((sec - _lastSavedPositionSeconds).abs() >= 5) {
+        _lastSavedPositionSeconds = sec;
+        _persistPosition(pos);
+      }
       notifyListeners();
     });
     _bufferedPositionSub = _audioRepository.bufferedPositionStream.listen((
@@ -463,6 +517,7 @@ class PlayerProvider extends ChangeNotifier {
     _shuffleMode = false;
     _audioHandler?.clearQueue();
     await stop();
+    _persistPlayerState();
     notifyListeners();
   }
 
@@ -510,7 +565,7 @@ class PlayerProvider extends ChangeNotifier {
         return;
       }
 
-      await _playRecommendationsFromCurrentTrack();
+      await _fetchAutoplayRecommendations();
     } finally {
       _isHandlingCompletion = false;
     }
@@ -520,8 +575,9 @@ class PlayerProvider extends ChangeNotifier {
     await _handleCompletion();
   }
 
-  Future<void> _playRecommendationsFromCurrentTrack() async {
+  Future<void> _fetchAutoplayRecommendations() async {
     final seed = _currentTrack ?? _queue[_currentIndex];
+    _isAutoplaying = true;
     _isLoading = true;
     notifyListeners();
 
@@ -535,24 +591,38 @@ class PlayerProvider extends ChangeNotifier {
         }
       }
 
-      if (uniqueRecommendations.isEmpty) {
+      if (uniqueRecommendations.isNotEmpty) {
+        final firstRecommendationIndex = _queue.length;
+        _queue = [..._queue, ...uniqueRecommendations];
+        _currentIndex = firstRecommendationIndex;
+        notifyListeners();
+        await playTrack(_queue[_currentIndex], quality: _lastPlaybackQuality);
+        _preDownloadAutoplay();
+      } else {
         _isPlaying = false;
-        return;
       }
-
-      final firstRecommendationIndex = _queue.length;
-      _queue = [..._queue, ...uniqueRecommendations];
-      _currentIndex = firstRecommendationIndex;
-      notifyListeners();
-      await playTrack(_queue[_currentIndex], quality: _lastPlaybackQuality);
     } catch (e) {
       _isPlaying = false;
       _error = 'Failed to load recommendations: ${e.toString()}';
       notifyListeners();
     } finally {
+      _isAutoplaying = false;
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  void _preDownloadAutoplay() {
+    final dl = _downloadProvider;
+    final settings = _settingsProvider;
+    if (dl == null || settings == null) return;
+    dl.preDownloadUpcoming(
+      _queue,
+      _currentIndex,
+      '__autoplay__',
+      prebufferCount: settings.prebufferCount,
+      quality: settings.audioQuality.name,
+    );
   }
 
   void setAudioHandler(MusicAudioHandler handler) {
@@ -593,6 +663,9 @@ class PlayerProvider extends ChangeNotifier {
       }
     });
     _syncQueueToHandler();
+    if (_currentTrack != null && _audioHandler != null) {
+      _audioHandler!.mediaItem.add(_trackToMediaItem(_currentTrack!));
+    }
     final mode = switch (_repeatMode) {
       repeat.PlaybackRepeatMode.none => AudioServiceRepeatMode.none,
       repeat.PlaybackRepeatMode.one => AudioServiceRepeatMode.one,
@@ -622,6 +695,68 @@ class PlayerProvider extends ChangeNotifier {
 
   void setCrossfadeEnabled(bool enabled) {
     _audioHandler?.customAction('setCrossfadeEnabled', {'enabled': enabled});
+  }
+
+  Future<void> _persistPlayerState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (_currentTrack == null) {
+        await prefs.remove('last_track');
+        await prefs.remove('last_queue');
+        await prefs.remove('last_index');
+        await prefs.remove('last_position');
+        await prefs.remove('last_playlist_id');
+        return;
+      }
+
+      final trackMap = _trackToMap(_currentTrack!);
+      await prefs.setString('last_track', jsonEncode(trackMap));
+
+      final queueMaps = _queue.map(_trackToMap).toList();
+      await prefs.setString('last_queue', jsonEncode(queueMaps));
+
+      await prefs.setInt('last_index', _currentIndex);
+      await prefs.setInt('last_position', _position.inSeconds);
+
+      if (_currentPlaylistId != null) {
+        await prefs.setString('last_playlist_id', _currentPlaylistId!);
+      } else {
+        await prefs.remove('last_playlist_id');
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _persistPosition(Duration pos) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('last_position', pos.inSeconds);
+    } catch (_) {}
+  }
+
+  Map<String, dynamic> _trackToMap(Track t) {
+    return {
+      'id': t.id,
+      'title': t.title,
+      'author': t.author,
+      'thumbnailUrl': t.thumbnailUrl,
+      'durationSeconds': t.duration.inSeconds,
+      'index': t.index,
+      'albumId': t.albumId,
+      'artistId': t.artistId,
+    };
+  }
+
+  Track _trackFromMap(Map<String, dynamic> m) {
+    return Track(
+      id: m['id'] as String,
+      title: m['title'] as String,
+      author: m['author'] as String?,
+      thumbnailUrl: m['thumbnailUrl'] as String?,
+      duration: Duration(seconds: m['durationSeconds'] as int? ?? 0),
+      index: m['index'] as int? ?? 0,
+      albumId: m['albumId'] as String?,
+      artistId: m['artistId'] as String?,
+    );
   }
 
   @override

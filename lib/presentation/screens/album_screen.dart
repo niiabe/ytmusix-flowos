@@ -67,6 +67,7 @@ class _AlbumScreenState extends State<AlbumScreen> {
   }
 
   @override
+  @override
   Widget build(BuildContext context) {
     final playerWatcher = context.watch<PlayerProvider>();
     final isNowPlaying = playerWatcher.currentTrack != null;
@@ -77,11 +78,11 @@ class _AlbumScreenState extends State<AlbumScreen> {
               isPlaying: playerWatcher.isPlaying,
             )
           : null,
-      body: SafeArea(
-        child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : _error != null
-                ? Center(
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+              ? SafeArea(
+                  child: Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -99,9 +100,9 @@ class _AlbumScreenState extends State<AlbumScreen> {
                         ),
                       ],
                     ),
-                  )
-                : _buildContent(),
-      ),
+                  ),
+                )
+              : _buildContent(),
     );
   }
 
@@ -110,183 +111,206 @@ class _AlbumScreenState extends State<AlbumScreen> {
     final player = context.watch<PlayerProvider>();
     final playlistProvider = context.watch<PlaylistProvider>();
     final isFav = playlistProvider.isCollectionFavorite(album.id);
+    final statusBarHeight = MediaQuery.of(context).padding.top;
 
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(
-          child: Container(
-            margin: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: const Color(0xFF171717),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: Colors.white.withAlpha(14)),
-            ),
-            child: Column(
-              children: [
-                Row(
+          child: Stack(
+            children: [
+              Container(
+                height: 380,
+                width: double.infinity,
+                foregroundDecoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.black87,
+                    ],
+                  ),
+                ),
+                child: Image.network(
+                  album.thumbnailUrl ?? '',
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, e, s) => Container(
+                    color: const Color(0xFF282828),
+                    child: const Icon(Icons.album_rounded, size: 64, color: Colors.white24),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: statusBarHeight + 12,
+                left: 20,
+                right: 20,
+                child: Row(
                   children: [
-                    SizedBox(
-                      width: 40,
-                      height: 40,
+                    Container(
+                      decoration: const BoxDecoration(
+                        color: Colors.black45,
+                        shape: BoxShape.circle,
+                      ),
                       child: IconButton(
-                        style: IconButton.styleFrom(
-                          backgroundColor: Colors.white.withAlpha(10),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
+                        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: Colors.white),
                         onPressed: () => Navigator.pop(context),
                       ),
                     ),
                     const Spacer(),
-                    IconButton(
-                      icon: Icon(
-                        isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                        color: isFav ? Colors.redAccent : Colors.white,
-                        size: 20,
+                    Container(
+                      decoration: const BoxDecoration(
+                        color: Colors.black45,
+                        shape: BoxShape.circle,
                       ),
-                      tooltip: isFav ? 'Remove from favorites' : 'Add to favorites',
-                      onPressed: () {
-                        final playlist = Playlist(
-                          id: album.id,
-                          title: album.title,
-                          author: album.artist,
-                          thumbnailUrl: album.thumbnailUrl,
-                          videoCount: album.tracks.length,
-                          tracks: album.tracks,
-                          type: 'album',
-                        );
-                        playlistProvider.toggleFavoriteCollection(playlist, 'album');
-                      },
+                      child: IconButton(
+                        icon: Icon(
+                          isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                          color: isFav ? Colors.redAccent : Colors.white,
+                          size: 20,
+                        ),
+                        tooltip: isFav ? 'Remove from favorites' : 'Add to favorites',
+                        onPressed: () {
+                          final playlist = Playlist(
+                            id: album.id,
+                            title: album.title,
+                            author: album.artist,
+                            thumbnailUrl: album.thumbnailUrl,
+                            videoCount: album.tracks.length,
+                            tracks: album.tracks,
+                            type: 'album',
+                          );
+                          playlistProvider.toggleFavoriteCollection(playlist, 'album');
+                        },
+                      ),
                     ),
                     const SizedBox(width: 8),
-                    const Text(
-                      'Album',
-                      style: TextStyle(fontSize: 14, color: Colors.white54),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.black45,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Text(
+                        'Album',
+                        style: TextStyle(fontSize: 12, color: Colors.white70, fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 10),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
+              ),
+              Positioned(
+                bottom: 24,
+                left: 24,
+                right: 24,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(18),
-                      child: Image.network(
-                        album.thumbnailUrl ?? '',
-                        width: 112,
-                        height: 112,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, e, s) => Container(
-                          width: 112,
-                          height: 112,
-                          color: const Color(0xFF282828),
-                          child: const Icon(Icons.album_rounded),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            album.title,
-                            style: const TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w800,
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 4),
-                          GestureDetector(
-                            onTap: album.artistId != null
-                                ? () => Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => ArtistScreen(
-                                          artistId: album.artistId!,
-                                          name: album.artist,
-                                        ),
-                                      ),
-                                    )
-                                : null,
-                            child: Text(
-                              '${album.artist}${album.year != null ? ' · ${album.year}' : ''}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: album.artistId != null
-                                    ? Theme.of(context).colorScheme.primary
-                                    : Colors.white54,
-                              ),
-                            ),
-                          ),
+                    Text(
+                      album.title,
+                      style: const TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white,
+                        shadows: [
+                          Shadow(color: Colors.black45, blurRadius: 8, offset: Offset(0, 3)),
                         ],
                       ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                Row(
-                  children: [
-                    SizedBox(
-                      width: 54,
-                      height: 54,
-                      child: IconButton(
-                        style: IconButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: Colors.black,
-                          shape: const CircleBorder(),
+                    const SizedBox(height: 6),
+                    GestureDetector(
+                      onTap: album.artistId != null
+                          ? () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => ArtistScreen(
+                                    artistId: album.artistId!,
+                                    name: album.artist,
+                                  ),
+                                ),
+                              )
+                          : null,
+                      child: Text(
+                        '${album.artist}${album.year != null ? ' · ${album.year}' : ''}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: album.artistId != null
+                              ? Theme.of(context).colorScheme.primary
+                              : Colors.white70,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          shadows: const [
+                            Shadow(color: Colors.black45, blurRadius: 4, offset: Offset(0, 1)),
+                          ],
                         ),
-                        icon: const Icon(Icons.play_arrow_rounded, size: 30),
-                        onPressed: album.tracks.isEmpty
-                            ? null
-                            : () {
-                                final quality = context.read<SettingsProvider>().audioQuality;
-                                player.setQueue(
-                                  album.tracks,
-                                  startIndex: 0,
-                                  playlistId: 'album_${album.id}',
-                                );
-                                player.playTrack(album.tracks.first, quality: quality);
-                              },
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    SizedBox(
-                      width: 44,
-                      height: 44,
-                      child: IconButton(
-                        style: IconButton.styleFrom(
-                          backgroundColor: Colors.white.withAlpha(10),
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        SizedBox(
+                          height: 48,
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.white,
+                              foregroundColor: Colors.black,
+                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(24),
+                              ),
+                            ),
+                            icon: const Icon(Icons.play_arrow_rounded, size: 22),
+                            label: const Text('Play', style: TextStyle(fontWeight: FontWeight.bold)),
+                            onPressed: album.tracks.isEmpty
+                                ? null
+                                : () {
+                                    final quality = context.read<SettingsProvider>().audioQuality;
+                                    player.setQueue(
+                                      album.tracks,
+                                      startIndex: 0,
+                                      playlistId: 'album_${album.id}',
+                                    );
+                                    player.playTrack(album.tracks.first, quality: quality);
+                                  },
                           ),
                         ),
-                        icon: const Icon(Icons.shuffle_rounded, size: 20),
-                        onPressed: album.tracks.isEmpty
-                            ? null
-                            : () {
-                                final quality = context.read<SettingsProvider>().audioQuality;
-                                player.setQueue(
-                                  album.tracks,
-                                  startIndex: 0,
-                                  playlistId: 'album_${album.id}',
-                                );
-                                player.toggleShuffle();
-                                player.playTrack(album.tracks.first, quality: quality);
-                              },
-                      ),
+                        const SizedBox(width: 12),
+                        SizedBox(
+                          height: 48,
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: const BorderSide(color: Colors.white54),
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(24),
+                              ),
+                              backgroundColor: Colors.white.withAlpha(20),
+                            ),
+                            icon: const Icon(Icons.shuffle_rounded, size: 18),
+                            label: const Text('Shuffle', style: TextStyle(fontWeight: FontWeight.bold)),
+                            onPressed: album.tracks.isEmpty
+                                ? null
+                                : () {
+                                    final quality = context.read<SettingsProvider>().audioQuality;
+                                    player.setQueue(
+                                      album.tracks,
+                                      startIndex: 0,
+                                      playlistId: 'album_${album.id}',
+                                    );
+                                    player.toggleShuffle();
+                                    player.playTrack(album.tracks.first, quality: quality);
+                                  },
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
         if (album.tracks.isEmpty)

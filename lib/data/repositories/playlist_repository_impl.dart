@@ -32,7 +32,7 @@ class PlaylistRepositoryImpl implements PlaylistRepository {
     final videoId = _parseVideoId(trimmed);
     final playlistId = _parsePlaylistId(trimmed);
 
-    if (playlistId != null) {
+    if (playlistId != null && !_looksLikeVideoId(playlistId)) {
       final playlist = await remoteDataSource.getPlaylist(playlistId);
       await localDatabase.insertPlaylist(playlist);
       await localDatabase.insertTracks(playlist.id, playlist.tracks);
@@ -73,6 +73,10 @@ class PlaylistRepositoryImpl implements PlaylistRepository {
     }
 
     throw Exception('Could not parse YouTube URL or ID: $input');
+  }
+
+  bool _looksLikeVideoId(String id) {
+    return RegExp(r'^[a-zA-Z0-9_-]{11}$').hasMatch(id);
   }
 
   String? _parseVideoId(String input) {
@@ -272,6 +276,10 @@ class PlaylistRepositoryImpl implements PlaylistRepository {
 
   @override
   Future<void> toggleFavoriteCollection(Playlist playlist, String type) async {
+    final isFav = await localDatabase.isCollectionFavorite(playlist.id);
+    if (!isFav) {
+      await savePlaylist(playlist);
+    }
     await localDatabase.toggleFavoriteCollection(
       PlaylistModel(
         id: playlist.id,
@@ -298,6 +306,22 @@ class PlaylistRepositoryImpl implements PlaylistRepository {
   @override
   Future<List<Playlist>> getFavoriteCollections() async {
     final models = await localDatabase.getFavoriteCollections();
-    return models.map((m) => m.toEntity()).toList();
+    final playlists = <Playlist>[];
+    for (final model in models) {
+      final tracks = await getCachedTracks(model.id);
+      playlists.add(
+        Playlist(
+          id: model.id,
+          title: model.title,
+          description: model.description,
+          thumbnailUrl: model.thumbnailUrl,
+          author: model.author,
+          videoCount: model.videoCount,
+          tracks: tracks,
+          type: model.type,
+        ),
+      );
+    }
+    return playlists;
   }
 }
