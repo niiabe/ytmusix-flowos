@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/audio_quality.dart';
 import '../providers/settings_provider.dart';
+import '../../service/keep_alive_service.dart';
 
 class PlaybackSettingsScreen extends StatelessWidget {
   const PlaybackSettingsScreen({super.key});
@@ -35,6 +36,18 @@ class PlaybackSettingsScreen extends StatelessWidget {
                     ],
                   ),
                 ),
+                if (KeepAliveService.isAndroidPlatform) ...[
+                  const SizedBox(height: 20),
+                  Container(
+                    padding: const EdgeInsets.all(22),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF171717),
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: Colors.white.withAlpha(14)),
+                    ),
+                    child: const _AndroidBackgroundSettings(),
+                  ),
+                ],
               ],
             );
           },
@@ -170,5 +183,125 @@ class PlaybackSettingsScreen extends StatelessWidget {
       case AudioQuality.high:
         return 'Best audio quality, more data usage';
     }
+  }
+}
+
+class _AndroidBackgroundSettings extends StatefulWidget {
+  const _AndroidBackgroundSettings();
+
+  @override
+  State<_AndroidBackgroundSettings> createState() =>
+      __AndroidBackgroundSettingsState();
+}
+
+class __AndroidBackgroundSettingsState
+    extends State<_AndroidBackgroundSettings> {
+  bool _isOptimized = true;
+  bool _isServiceRunning = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkStatus();
+  }
+
+  Future<void> _checkStatus() async {
+    final disabled = await KeepAliveService.isBatteryOptimizationDisabled();
+    final running = await KeepAliveService.isKeepAliveServiceRunning();
+    if (mounted) {
+      setState(() {
+        _isOptimized = !disabled;
+        _isServiceRunning = running;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Android Background Performance',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+          ),
+        ),
+        const SizedBox(height: 18),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text(
+            'Keep-Alive Service',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+            ),
+          ),
+          subtitle: const Text(
+            'Keep a persistent foreground service active to prevent playback crashes',
+            style: TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+          trailing: Switch(
+            value: _isServiceRunning,
+            onChanged: (value) async {
+              if (value) {
+                await KeepAliveService.startKeepAliveService();
+              } else {
+                await KeepAliveService.stopKeepAliveService();
+              }
+              _checkStatus();
+            },
+          ),
+        ),
+        const SizedBox(height: 12),
+        const Divider(color: Colors.white10),
+        const SizedBox(height: 12),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text(
+            'Battery Optimization',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+            ),
+          ),
+          subtitle: Text(
+            _isOptimized
+                ? 'Status: Optimized (may terminate playback in background)'
+                : 'Status: Unrestricted (recommended)',
+            style: TextStyle(
+              color: _isOptimized ? Colors.amber[400] : Colors.green[400],
+              fontSize: 12,
+            ),
+          ),
+          trailing: ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _isOptimized
+                  ? Colors.white.withAlpha(14)
+                  : Colors.green.withAlpha(24),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+            ),
+            onPressed: _isOptimized
+                ? () async {
+                    await KeepAliveService.requestDisableBatteryOptimization();
+                    Future.delayed(const Duration(seconds: 2), _checkStatus);
+                  }
+                : null,
+            child: Text(
+              _isOptimized ? 'Disable' : 'Disabled',
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }
