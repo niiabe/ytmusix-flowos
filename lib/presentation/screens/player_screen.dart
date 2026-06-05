@@ -783,13 +783,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Widget _buildPlayerHeader(BuildContext context, PlayerProvider player) {
     return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         _HeaderButton(
           icon: Icons.arrow_back_ios_new_rounded,
           tooltip: 'Back',
           onPressed: () => Navigator.pop(context),
         ),
-        const Spacer(),
+        _PlaybackModeTabs(
+          mode: _playbackMode,
+          onAudioTap: () => _selectAudioMode(player),
+          onVideoTap: () => _selectVideoMode(player),
+        ),
         _HeaderButton(
           icon: Icons.more_horiz_rounded,
           tooltip: 'More',
