@@ -297,11 +297,6 @@ class YoutubeRemoteDataSource {
     final manifest = await _yt.videos.streams
         .getManifest(videoId)
         .timeout(_timeout);
-    final hlsMuxed = manifest.hls.whereType<HlsMuxedStreamInfo>().toList();
-    if (hlsMuxed.isNotEmpty) {
-      final best = _selectByQuality(hlsMuxed, quality);
-      return _addGeoBypassParams(best.url.toString());
-    }
 
     final iosFriendlyMuxed = manifest.muxed
         .where(
@@ -321,6 +316,12 @@ class YoutubeRemoteDataSource {
         .toList();
     if (mp4Muxed.isNotEmpty) {
       final best = _selectByQuality(mp4Muxed, quality);
+      return _addGeoBypassParams(best.url.toString());
+    }
+
+    final hlsMuxed = manifest.hls.whereType<HlsMuxedStreamInfo>().toList();
+    if (hlsMuxed.isNotEmpty) {
+      final best = _selectByQuality(hlsMuxed, quality);
       return _addGeoBypassParams(best.url.toString());
     }
 
