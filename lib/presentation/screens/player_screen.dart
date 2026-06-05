@@ -2673,8 +2673,12 @@ class _SyncedLyricsListState extends State<_SyncedLyricsList> {
   }
 
   int _activeLyricIndex(List<LyricLine> lines, Duration position) {
+    if (lines.isEmpty) return -1;
     final adjusted = position + const Duration(milliseconds: 150);
-    var active = 0;
+    if (adjusted < lines.first.time) {
+      return -1;
+    }
+    var active = -1;
     for (var i = 0; i < lines.length; i++) {
       if (lines[i].time <= adjusted) {
         active = i;

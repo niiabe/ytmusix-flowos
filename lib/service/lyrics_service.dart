@@ -67,7 +67,15 @@ class LyricsService {
           splitArtist = _cleanArtist(parts[0]);
           splitTitle = _cleanTitle(parts[1]);
 
+          // B1: Try order 1: Artist (parts[0]) - Title (parts[1])
           result = await _search(splitTitle, splitArtist, duration);
+          if (result != null && result.hasAnyLyrics) {
+            _cache[cacheKey] = result;
+            return result;
+          }
+
+          // B2: Try order 2: Title (parts[0]) - Artist (parts[1])
+          result = await _search(splitArtist, splitTitle, duration);
           if (result != null && result.hasAnyLyrics) {
             _cache[cacheKey] = result;
             return result;
@@ -85,6 +93,13 @@ class LyricsService {
       // Strategy D: split-title only search
       if (splitTitle != null) {
         result = await _search(splitTitle, '', duration);
+        if (result != null && result.hasAnyLyrics) {
+          _cache[cacheKey] = result;
+          return result;
+        }
+      }
+      if (splitArtist != null) {
+        result = await _search(splitArtist, '', duration);
         if (result != null && result.hasAnyLyrics) {
           _cache[cacheKey] = result;
           return result;
@@ -194,15 +209,27 @@ class LyricsService {
   List<LyricLine> _parseSyncedLyrics(String? lyrics) {
     if (lyrics == null || lyrics.trim().isEmpty) return const [];
     final lines = <LyricLine>[];
-    final regex = RegExp(r'^\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]\s*(.*)$');
+    final regex = RegExp(r'\[(\d{1,3}):(\d{2})(?:[:.](\d{1,3}))?\](.*)');
     for (final raw in lyrics.split('\n')) {
-      final match = regex.firstMatch(raw.trim());
+      final trimmedLine = raw.trim();
+      final match = regex.firstMatch(trimmedLine);
       if (match == null) continue;
       final minutes = int.parse(match.group(1)!);
       final seconds = int.parse(match.group(2)!);
       final fraction = (match.group(3) ?? '0').padRight(3, '0');
       final millis = int.parse(fraction.substring(0, 3));
-      final text = match.group(4)?.trim() ?? '';
+      
+      var text = match.group(4)?.trim() ?? '';
+      // Clean up multiple leading timestamp brackets if present
+      while (text.startsWith('[') && text.contains(']')) {
+        final closingIndex = text.indexOf(']');
+        if (closingIndex != -1) {
+          text = text.substring(closingIndex + 1).trim();
+        } else {
+          break;
+        }
+      }
+      
       if (text.isEmpty) continue;
       lines.add(
         LyricLine(
