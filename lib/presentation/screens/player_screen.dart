@@ -366,28 +366,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       );
                     }
 
-                    return SingleChildScrollView(
-                      physics: const BouncingScrollPhysics(),
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(
-                          minHeight: constraints.maxHeight,
+                    return SizedBox.expand(
+                      child: Padding(
+                        padding: EdgeInsets.fromLTRB(
+                          24,
+                          12,
+                          24,
+                          compact ? 16 : 28,
                         ),
-                        child: Padding(
-                          padding: EdgeInsets.fromLTRB(
-                            24,
-                            12,
-                            24,
-                            compact ? 16 : 28,
-                          ),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
+                        child: Column(
+                          mainAxisSize: MainAxisSize.max,
+                          children: [
                               _buildPlayerHeader(context, player),
-                              SizedBox(
-                                height: isAudio
-                                    ? (compact ? 18 : 28)
-                                    : (compact ? 24 : 42),
-                              ),
+                              const Spacer(),
                               isAudio
                                   ? _ArtworkLyricsStage(
                                       imageUrl: track.thumbnailUrl,
@@ -403,7 +394,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                       onControllerInitialized:
                                           _onVideoControllerInitialized,
                                     ),
-                              SizedBox(height: isAudio ? 28 : 24),
+                              const Spacer(),
                               Row(
                                 children: [
                                   Expanded(
@@ -476,7 +467,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 ],
                               ),
                               if (isAudio) ...[
-                                SizedBox(height: compact ? 26 : 34),
+                                const Spacer(),
                                 _SeekWaveform(
                                   position: player.position,
                                   duration: player.duration,
@@ -518,7 +509,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     ),
                                   ],
                                 ),
-                                SizedBox(height: compact ? 24 : 30),
+                                const SizedBox(height: 20),
                                 Row(
                                   mainAxisAlignment:
                                       MainAxisAlignment.spaceEvenly,
@@ -566,7 +557,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     ),
                                   ],
                                 ),
-                                SizedBox(height: compact ? 18 : 22),
+                                const SizedBox(height: 12),
                               ] else if (_activeVideoController != null) ...[
                                 _buildVideoControlsBelowTitle(
                                   context,
@@ -586,9 +577,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             ],
                           ),
                         ),
-                      ),
-                    );
-                  },
+                      );
+                    },
                 ),
               ),
             ],
