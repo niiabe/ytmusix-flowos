@@ -144,24 +144,24 @@ class PlayerBar extends StatelessWidget {
                             )
                           else ...[
                             IconButton(
-                              icon: const Icon(Icons.skip_previous_rounded),
+                              icon: const Icon(Icons.fast_rewind_rounded),
                               onPressed: player.previous,
-                              iconSize: 20,
+                              iconSize: 22,
                             ),
                             IconButton(
                               icon: Icon(
                                 player.isPlaying
-                                    ? Icons.pause_circle_filled
-                                    : Icons.play_circle_filled,
+                                    ? Icons.pause_rounded
+                                    : Icons.play_arrow_rounded,
                               ),
                               onPressed: player.togglePlayPause,
-                              iconSize: 32,
+                              iconSize: 34,
                               color: Theme.of(context).colorScheme.primary,
                             ),
                             IconButton(
-                              icon: const Icon(Icons.skip_next_rounded),
+                              icon: const Icon(Icons.fast_forward_rounded),
                               onPressed: hasNext ? () => player.next() : null,
-                              iconSize: 20,
+                              iconSize: 22,
                             ),
                           ],
                         ],

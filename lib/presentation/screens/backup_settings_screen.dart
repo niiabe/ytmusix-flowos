@@ -13,11 +13,13 @@ class BackupSettingsScreen extends StatefulWidget {
 class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
   Future<void> _importPlaylists() async {
     try {
-      final file = await file_picker.FilePicker.pickFile(
+      final result = await file_picker.FilePicker.platform.pickFiles(
         type: file_picker.FileType.custom,
         allowedExtensions: ['json', 'md', 'xml', 'txt'],
       );
-      if (file == null || file.path == null) return;
+      if (result == null || result.files.isEmpty) return;
+      final file = result.files.first;
+      if (file.path == null) return;
       if (!mounted) return;
       final provider = context.read<PlaylistProvider>();
       final count = await provider.importPlaylists(file.path!);

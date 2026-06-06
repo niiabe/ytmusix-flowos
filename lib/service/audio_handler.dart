@@ -6,10 +6,12 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/utils/network_utils.dart';
 import '../domain/repositories/audio_repository.dart';
+import '../domain/repositories/playlist_repository.dart';
 import '../domain/entities/video.dart';
 import '../data/datasources/local/playlist_database.dart';
 import '../data/datasources/remote/youtube_remote_datasource.dart';
 import 'auth_service.dart';
+import 'auto_dj_service.dart';
 
 class MusicAudioHandler extends BaseAudioHandler {
   final AudioPlayer _player1 = AudioPlayer(
@@ -51,6 +53,8 @@ class MusicAudioHandler extends BaseAudioHandler {
   late final YoutubeRemoteDataSource _remoteDataSource;
   bool _dataSourceInitialized = false;
   AudioRepository? _audioRepository;
+  PlaylistRepository? _playlistRepository;
+  AutoDjService? _autoDjService;
 
   bool _crossfadeEnabled = false;
   bool _isCrossfading = false;
@@ -59,6 +63,7 @@ class MusicAudioHandler extends BaseAudioHandler {
   int? _crossfadeTargetIndex;
   bool _isHandlingCompletion = false;
   bool _fetchingRecommendations = false;
+  Future<void>? _autoDjAppendFuture;
 
   @override
   Future<void> setRepeatMode(AudioServiceRepeatMode repeatMode) async {
@@ -68,6 +73,10 @@ class MusicAudioHandler extends BaseAudioHandler {
 
   void setRepository(AudioRepository repository) {
     _audioRepository = repository;
+  }
+
+  void setPlaylistRepository(PlaylistRepository repository) {
+    _playlistRepository = repository;
   }
 
   final skipNextRequested = StreamController<void>.broadcast();
@@ -114,7 +123,8 @@ class MusicAudioHandler extends BaseAudioHandler {
   final _positionController = StreamController<Duration>.broadcast();
   final _bufferedPositionController = StreamController<Duration>.broadcast();
   final _durationController = StreamController<Duration>.broadcast();
-  final _processingStateController = StreamController<ProcessingState>.broadcast();
+  final _processingStateController =
+      StreamController<ProcessingState>.broadcast();
 
   MusicAudioHandler() {
     _database = PlaylistDatabase();
@@ -200,12 +210,112 @@ class MusicAudioHandler extends BaseAudioHandler {
 
   void _onProcessingState(ProcessingState state) {
     if (state == ProcessingState.completed) {
+      if (_isCrossfading) return;
       _handlePlaybackCompleted();
     }
   }
 
+  Future<void> _triggerAutoDjContinuation() async {
+    final inFlight = _autoDjAppendFuture;
+    if (inFlight != null) {
+      await inFlight;
+      return;
+    }
+
+    final appendFuture = _appendAutoDjContinuation();
+    _autoDjAppendFuture = appendFuture;
+    try {
+      await appendFuture;
+    } finally {
+      if (identical(_autoDjAppendFuture, appendFuture)) {
+        _autoDjAppendFuture = null;
+      }
+    }
+  }
+
+  Future<void> _appendAutoDjContinuation() async {
+    if (_audioRepository == null ||
+        _playlistRepository == null ||
+        _currentIndex == null ||
+        _queue.isEmpty) {
+      return;
+    }
+
+    _autoDjService ??= AutoDjService(
+      audioRepository: _audioRepository!,
+      playlistRepository: _playlistRepository!,
+    );
+
+    String mode = 'off';
+    int count = 5;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      mode = prefs.getString('autoDjMode') ?? 'off';
+      count = prefs.getInt('autoDjSongsCount') ?? 5;
+    } catch (_) {}
+
+    if (mode == 'off' || count <= 0) return;
+
+    final currentItem = _queue[_currentIndex!];
+    final seed = Track(
+      id: currentItem.id,
+      title: currentItem.title,
+      author: currentItem.artist,
+      thumbnailUrl: currentItem.artUri?.toString(),
+      duration: currentItem.duration ?? Duration.zero,
+    );
+
+    final excludeIds = _queue.map((item) => item.id).toList();
+
+    final nextTracks = await _autoDjService!.getContinuationTracks(
+      mode: mode,
+      count: count,
+      currentTrack: seed,
+      excludeIds: excludeIds,
+    );
+
+    if (nextTracks.isNotEmpty) {
+      final newItems = nextTracks
+          .map(
+            (track) => MediaItem(
+              id: track.id,
+              title: track.title,
+              artist: track.author ?? '',
+              artUri: track.thumbnailUrl != null
+                  ? Uri.tryParse(track.thumbnailUrl!)
+                  : null,
+              duration: track.duration,
+            ),
+          )
+          .toList();
+
+      _queue.addAll(newItems);
+      queue.add(_queue);
+    }
+  }
+
+  Future<void> _maybeTriggerAutoDjQueueTopUp() async {
+    if (_currentIndex == null || _queue.isEmpty) {
+      return;
+    }
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final mode = prefs.getString('autoDjMode') ?? 'off';
+      if (mode == 'off') return;
+
+      final threshold = prefs.getInt('autoDjThreshold') ?? 2;
+      final remaining = _queue.length - _currentIndex! - 1;
+      if (remaining <= threshold) {
+        await _triggerAutoDjContinuation();
+      }
+    } catch (_) {}
+  }
+
   Future<void> _handlePlaybackCompleted() async {
-    if (_isHandlingCompletion || _currentIndex == null || _queue.isEmpty) return;
+    if (_isHandlingCompletion || _currentIndex == null || _queue.isEmpty) {
+      return;
+    }
     _isHandlingCompletion = true;
 
     try {
@@ -224,6 +334,18 @@ class MusicAudioHandler extends BaseAudioHandler {
         return;
       }
 
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final mode = prefs.getString('autoDjMode') ?? 'off';
+        if (mode != 'off') {
+          await _triggerAutoDjContinuation();
+          if (_currentIndex! + 1 < _queue.length) {
+            await _playAtIndex(_currentIndex! + 1);
+            return;
+          }
+        }
+      } catch (_) {}
+
       await _playRecommendations();
     } finally {
       _isHandlingCompletion = false;
@@ -231,7 +353,9 @@ class MusicAudioHandler extends BaseAudioHandler {
   }
 
   Future<void> _playRecommendations() async {
-    if (_audioRepository == null || _currentIndex == null || _queue.isEmpty) return;
+    if (_audioRepository == null || _currentIndex == null || _queue.isEmpty) {
+      return;
+    }
     final currentItem = _queue[_currentIndex!];
     try {
       final seed = Track(
@@ -246,13 +370,17 @@ class MusicAudioHandler extends BaseAudioHandler {
       final newItems = <MediaItem>[];
       for (final track in recommendations) {
         if (seenIds.add(track.id)) {
-          newItems.add(MediaItem(
-            id: track.id,
-            title: track.title,
-            artist: track.author ?? '',
-            artUri: track.thumbnailUrl != null ? Uri.tryParse(track.thumbnailUrl!) : null,
-            duration: track.duration,
-          ));
+          newItems.add(
+            MediaItem(
+              id: track.id,
+              title: track.title,
+              artist: track.author ?? '',
+              artUri: track.thumbnailUrl != null
+                  ? Uri.tryParse(track.thumbnailUrl!)
+                  : null,
+              duration: track.duration,
+            ),
+          );
         }
       }
       if (newItems.isNotEmpty) {
@@ -315,7 +443,8 @@ class MusicAudioHandler extends BaseAudioHandler {
   int get queueLength => _queue.length;
 
   bool get currentTrackCompleted =>
-      !_activePlayer.playing && _activePlayer.processingState == ProcessingState.completed;
+      !_activePlayer.playing &&
+      _activePlayer.processingState == ProcessingState.completed;
 
   Future<void> playTrack(String url, MediaItem item) async {
     if (_isCrossfading) {
@@ -435,6 +564,7 @@ class MusicAudioHandler extends BaseAudioHandler {
     _currentIndex = index;
     final item = _queue[index];
     mediaItem.add(item);
+    unawaited(_maybeTriggerAutoDjQueueTopUp());
 
     final url = await _resolveUrlForItem(item);
     if (url == null || url.isEmpty) return;
@@ -557,7 +687,9 @@ class MusicAudioHandler extends BaseAudioHandler {
     final dur = player.duration;
     if (dur != null && dur.inSeconds > 7) {
       final remaining = dur - pos;
-      if (_crossfadeEnabled && remaining <= const Duration(seconds: 7) && !_isCrossfading) {
+      if (_crossfadeEnabled &&
+          remaining <= const Duration(seconds: 7) &&
+          !_isCrossfading) {
         _checkAndStartCrossfade();
       }
     }
@@ -578,12 +710,34 @@ class MusicAudioHandler extends BaseAudioHandler {
     if (nextIndex != null) {
       await _startCrossfade(nextIndex);
     } else {
-      _fetchAndAppendRecommendationsForCrossfade();
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final mode = prefs.getString('autoDjMode') ?? 'off';
+        if (mode != 'off') {
+          _isCrossfading = true;
+          await _triggerAutoDjContinuation();
+          if (_currentIndex! + 1 < _queue.length) {
+            final target = _currentIndex! + 1;
+            await _startCrossfade(target);
+          } else {
+            _isCrossfading = false;
+          }
+        } else {
+          _fetchAndAppendRecommendationsForCrossfade();
+        }
+      } catch (_) {
+        _isCrossfading = false;
+      }
     }
   }
 
   Future<void> _fetchAndAppendRecommendationsForCrossfade() async {
-    if (_fetchingRecommendations || _audioRepository == null || _currentIndex == null || _queue.isEmpty) return;
+    if (_fetchingRecommendations ||
+        _audioRepository == null ||
+        _currentIndex == null ||
+        _queue.isEmpty) {
+      return;
+    }
     _fetchingRecommendations = true;
     try {
       final currentItem = _queue[_currentIndex!];
@@ -599,13 +753,17 @@ class MusicAudioHandler extends BaseAudioHandler {
       final newItems = <MediaItem>[];
       for (final track in recommendations) {
         if (seenIds.add(track.id)) {
-          newItems.add(MediaItem(
-            id: track.id,
-            title: track.title,
-            artist: track.author ?? '',
-            artUri: track.thumbnailUrl != null ? Uri.tryParse(track.thumbnailUrl!) : null,
-            duration: track.duration,
-          ));
+          newItems.add(
+            MediaItem(
+              id: track.id,
+              title: track.title,
+              artist: track.author ?? '',
+              artUri: track.thumbnailUrl != null
+                  ? Uri.tryParse(track.thumbnailUrl!)
+                  : null,
+              duration: track.duration,
+            ),
+          );
         }
       }
       if (newItems.isNotEmpty) {
@@ -662,13 +820,24 @@ class MusicAudioHandler extends BaseAudioHandler {
 
     mediaItem.add(nextItem);
 
-    int step = 0;
-    const totalSteps = 70;
+    final remaining = active.duration == null
+        ? const Duration(seconds: 7)
+        : active.duration! - active.position;
+    final fadeDuration = remaining > const Duration(milliseconds: 900)
+        ? remaining - const Duration(milliseconds: 300)
+        : const Duration(milliseconds: 900);
+    const stepDuration = Duration(milliseconds: 80);
+    final totalSteps =
+        (fadeDuration.inMilliseconds / stepDuration.inMilliseconds)
+            .ceil()
+            .clamp(12, 88);
+    var step = 0;
     _crossfadeTimer?.cancel();
-    _crossfadeTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) async {
+    _crossfadeTimer = Timer.periodic(stepDuration, (timer) async {
       step++;
-      final volumeActive = (1.0 - (step / totalSteps)).clamp(0.0, 1.0);
-      final volumeInactive = (step / totalSteps).clamp(0.0, 1.0);
+      final fraction = step / totalSteps;
+      final volumeActive = (1.0 - fraction).clamp(0.0, 1.0).toDouble();
+      final volumeInactive = fraction.clamp(0.0, 1.0).toDouble();
 
       active.setVolume(volumeActive);
       inactive.setVolume(volumeInactive);
@@ -695,6 +864,7 @@ class MusicAudioHandler extends BaseAudioHandler {
     inactive.setVolume(1.0);
 
     _isCrossfading = false;
+    unawaited(_maybeTriggerAutoDjQueueTopUp());
 
     if (inactive.duration != null) {
       _durationController.add(inactive.duration!);
@@ -720,7 +890,10 @@ class MusicAudioHandler extends BaseAudioHandler {
   }
 
   @override
-  Future<dynamic> customAction(String name, [Map<String, dynamic>? extras]) async {
+  Future<dynamic> customAction(
+    String name, [
+    Map<String, dynamic>? extras,
+  ]) async {
     if (name == 'setCrossfadeEnabled') {
       _crossfadeEnabled = extras?['enabled'] ?? false;
       if (!_crossfadeEnabled && _isCrossfading) {

@@ -7,7 +7,9 @@ import 'presentation/providers/player_provider.dart';
 import 'presentation/providers/playlist_provider.dart';
 import 'presentation/providers/download_provider.dart';
 import 'presentation/providers/settings_provider.dart';
+import 'presentation/providers/chart_provider.dart';
 import 'service/audio_handler.dart';
+import 'service/chart_service.dart';
 import 'presentation/screens/home_screen.dart';
 
 class YTMusixApp extends StatelessWidget {
@@ -41,9 +43,8 @@ class YTMusixApp extends StatelessWidget {
             settingsProvider: settingsProvider,
           )..setAudioHandler(audioHandler),
         ),
-        ChangeNotifierProvider.value(
-          value: downloadProvider,
-        ),
+        ChangeNotifierProvider.value(value: downloadProvider),
+        ChangeNotifierProvider(create: (_) => ChartProvider(ChartService())),
       ],
       child: MaterialApp(
         title: 'YTMusix',

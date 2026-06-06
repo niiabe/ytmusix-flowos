@@ -4,6 +4,7 @@ import 'youtube_settings_screen.dart';
 import 'backup_settings_screen.dart';
 import 'storage_settings_screen.dart';
 import 'about_screen.dart';
+import 'auto_dj_settings_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -23,6 +24,13 @@ class SettingsScreen extends StatelessWidget {
               title: 'Playback',
               subtitle: 'Pre-downloads, audio quality settings',
               page: const PlaybackSettingsScreen(),
+            ),
+            _buildSettingsItem(
+              context,
+              icon: Icons.bubble_chart_rounded,
+              title: 'Auto DJ',
+              subtitle: 'Queue continuation modes and mix tuning',
+              page: const AutoDjSettingsScreen(),
             ),
             _buildSettingsItem(
               context,

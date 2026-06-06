@@ -70,11 +70,11 @@ class _ArtistScreenState extends State<ArtistScreen> {
               isPlaying: playerWatcher.isPlaying,
             )
           : null,
-      body: SafeArea(
-        child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : _error != null
-                ? Center(
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+              ? SafeArea(
+                  child: Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -92,78 +92,150 @@ class _ArtistScreenState extends State<ArtistScreen> {
                         ),
                       ],
                     ),
-                  )
-                : _buildContent(),
-      ),
+                  ),
+                )
+              : _buildContent(),
     );
   }
 
   Widget _buildContent() {
     final artist = _artist!;
     final player = context.watch<PlayerProvider>();
+    final statusBarHeight = MediaQuery.of(context).padding.top;
 
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(
-          child: Container(
-            margin: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: const Color(0xFF171717),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: Colors.white.withAlpha(14)),
-            ),
-            child: Column(
-              children: [
-                Row(
+          child: Stack(
+            children: [
+              Container(
+                height: 380,
+                width: double.infinity,
+                foregroundDecoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.black87,
+                    ],
+                  ),
+                ),
+                child: Image.network(
+                  artist.thumbnailUrl ?? '',
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, e, s) => Container(
+                    color: const Color(0xFF282828),
+                    child: const Icon(Icons.person, size: 64, color: Colors.white24),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: statusBarHeight + 12,
+                left: 20,
+                right: 20,
+                child: Row(
                   children: [
-                    SizedBox(
-                      width: 40,
-                      height: 40,
+                    Container(
+                      decoration: const BoxDecoration(
+                        color: Colors.black45,
+                        shape: BoxShape.circle,
+                      ),
                       child: IconButton(
-                        style: IconButton.styleFrom(
-                          backgroundColor: Colors.white.withAlpha(10),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
+                        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: Colors.white),
                         onPressed: () => Navigator.pop(context),
                       ),
                     ),
                     const Spacer(),
-                    const Text(
-                      'Artist',
-                      style: TextStyle(fontSize: 14, color: Colors.white54),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.black45,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Text(
+                        'Artist',
+                        style: TextStyle(fontSize: 12, color: Colors.white70, fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 10),
-                ClipOval(
-                  child: Image.network(
-                    artist.thumbnailUrl ?? '',
-                    width: 112,
-                    height: 112,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, e, s) => Container(
-                      width: 112,
-                      height: 112,
-                      color: const Color(0xFF282828),
-                      child: const Icon(Icons.person, size: 48),
+              ),
+              Positioned(
+                bottom: 24,
+                left: 24,
+                right: 24,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      artist.name,
+                      style: const TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white,
+                        shadows: [
+                          Shadow(color: Colors.black38, blurRadius: 10, offset: Offset(0, 4)),
+                        ],
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        if (artist.topSongs.isNotEmpty)
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.white,
+                              foregroundColor: Colors.black,
+                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(28),
+                              ),
+                            ),
+                            icon: const Icon(Icons.play_arrow_rounded, size: 22),
+                            label: const Text('Play', style: TextStyle(fontWeight: FontWeight.bold)),
+                            onPressed: () {
+                              final quality = context.read<SettingsProvider>().audioQuality;
+                              player.setQueue(
+                                artist.topSongs,
+                                startIndex: 0,
+                                playlistId: 'artist_${artist.id}',
+                              );
+                              player.playTrack(artist.topSongs.first, quality: quality);
+                            },
+                          ),
+                        if (artist.topSongs.length > 1) ...[
+                          const SizedBox(width: 12),
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: const BorderSide(color: Colors.white54),
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(28),
+                              ),
+                              backgroundColor: Colors.white.withAlpha(20),
+                            ),
+                            icon: const Icon(Icons.shuffle_rounded, size: 18),
+                            label: const Text('Shuffle', style: TextStyle(fontWeight: FontWeight.bold)),
+                            onPressed: () {
+                              final quality = context.read<SettingsProvider>().audioQuality;
+                              player.setQueue(
+                                artist.topSongs,
+                                startIndex: 0,
+                                playlistId: 'artist_${artist.id}',
+                              );
+                              player.toggleShuffle();
+                              player.playTrack(artist.topSongs.first, quality: quality);
+                            },
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  artist.name,
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
         if (artist.topSongs.isNotEmpty) ...[

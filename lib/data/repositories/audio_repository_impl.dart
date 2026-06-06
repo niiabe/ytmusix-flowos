@@ -16,7 +16,9 @@ class AudioRepositoryImpl implements AudioRepository {
     required this.remoteDataSource,
     required this._handler,
     required this._database,
-  });
+  }) {
+    _handler.setRepository(this);
+  }
 
   @override
   Future<String> getAudioUrl(Track track, {String quality = 'low'}) async {

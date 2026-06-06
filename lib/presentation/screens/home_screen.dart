@@ -17,6 +17,9 @@ import 'search_screen.dart';
 import 'settings_screen.dart';
 import 'chart_list_screen.dart';
 import 'downloaded_screen.dart';
+import '../../domain/entities/chart_item.dart';
+import '../providers/chart_provider.dart';
+import '../../service/chart_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -28,6 +31,9 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   static const _tabs = ['Recent', 'New', 'Trend', 'Podcasts', 'Favourites'];
   int _homeTab = 0;
+
+  bool get _isPlaylistTab => _homeTab == 0;
+  bool get _isFavoritesTab => _homeTab == 4;
 
   String? get _activeFeedKey {
     if (_homeTab == 1) return 'new';
@@ -368,7 +374,7 @@ class _HomeScreenState extends State<HomeScreen> {
             return Future.wait([
               provider.loadSavedPlaylists(),
               provider.loadFavoriteCollections(),
-              chartProvider.loadCharts(force: true),
+              context.read<ChartProvider>().loadCharts(force: true),
             ]);
           },
           child: ListView(
@@ -428,6 +434,15 @@ class _HomeScreenState extends State<HomeScreen> {
                   playerProvider,
                   downloadProvider,
                 )
+              else if (_isPlaylistTab &&
+                  playerProvider.recentlyPlayed.isNotEmpty)
+                _buildTrackShelf(
+                  context,
+                  playerProvider.recentlyPlayed,
+                  false,
+                  playerProvider,
+                  'recent',
+                )
               else if (_isPlaylistTab)
                 _buildPlaylistShelf(
                   context,
@@ -438,21 +453,16 @@ class _HomeScreenState extends State<HomeScreen> {
               else
                 const SizedBox.shrink(),
               const SizedBox(height: 28),
-              if (_homeTab != 0)
-                _buildTopHits(
-                  context,
-                  _filteredPlaylists(provider),
-                  _isFavoritesTab ? provider.favoriteTracks : feedTracks,
-                  playerProvider,
-                  _isFavoritesTab ? provider.favoriteIds : null,
-                ),
-              const SizedBox(height: 28),
               _buildTopHits(
                 context,
                 _filteredPlaylists(provider),
-                feedTracks,
+                _homeTab == 0
+                    ? playerProvider.recentlyPlayed
+                    : _isFavoritesTab
+                    ? provider.favoriteTracks
+                    : feedTracks,
                 playerProvider,
-                _homeTab == 4 ? provider.favoriteIds : null,
+                _isFavoritesTab ? provider.favoriteIds : null,
               ),
             ],
           ),
@@ -536,37 +546,70 @@ class _HomeScreenState extends State<HomeScreen> {
               track: track,
               isCurrent: isCurrent,
               isPlaying: isCurrent && playerProvider.isPlaying,
-              onTap: () {
-                final quality = context.read<SettingsProvider>().audioQuality;
-                playerProvider.setQueue(
-                  tracks,
-                  startIndex: index,
-                  playlistId: '__feed_$feedKey',
-                );
-                playerProvider.playTrack(track, quality: quality);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const PlayerScreen()),
-                );
-              },
-              onPlay: () {
+              onTap: () => _playTrackShelfItem(
+                context,
+                tracks,
+                index,
+                playerProvider,
+                feedKey,
+                openPlayer: true,
+              ),
+              onPlay: () async {
                 if (isCurrent) {
                   playerProvider.togglePlayPause();
                   return;
                 }
-                final quality = context.read<SettingsProvider>().audioQuality;
-                playerProvider.setQueue(
+                await _playTrackShelfItem(
+                  context,
                   tracks,
-                  startIndex: index,
-                  playlistId: '__feed_$feedKey',
+                  index,
+                  playerProvider,
+                  feedKey,
                 );
-                playerProvider.playTrack(track, quality: quality);
               },
             ),
           );
         },
       ),
     );
+  }
+
+  Future<void> _playTrackShelfItem(
+    BuildContext context,
+    List<Track> tracks,
+    int index,
+    PlayerProvider playerProvider,
+    String feedKey, {
+    bool openPlayer = false,
+  }) async {
+    if (index < 0 || index >= tracks.length) return;
+
+    final quality = context.read<SettingsProvider>().audioQuality;
+    final track = tracks[index];
+    playerProvider.setQueue(
+      tracks,
+      startIndex: index,
+      playlistId: '__feed_$feedKey',
+    );
+    await playerProvider.playTrack(track, quality: quality);
+
+    if (!context.mounted) return;
+    if (playerProvider.error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(playerProvider.error!),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    if (openPlayer) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const PlayerScreen()),
+      );
+    }
   }
 
   Widget _buildPlaylistShelf(
@@ -603,34 +646,25 @@ class _HomeScreenState extends State<HomeScreen> {
               isPlaying: playerProvider.isPlaying,
               isDownloaded: isDownloaded,
               isDownloading: isDownloading,
-              onTap: () {
-                if (playlist.type == 'album') {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => AlbumScreen(
-                        albumId: playlist.id,
-                        title: playlist.title,
-                        artist: playlist.author,
-                        thumbnailUrl: playlist.thumbnailUrl,
-                      ),
-                    ),
-                  );
-                } else {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => PlaylistScreen(playlist: playlist),
-                    ),
-                  );
-                }
-              },
+              onTap: () => _openBrowsePlaylist(
+                context,
+                playlist,
+                playerProvider,
+                provider,
+              ),
               onPlay: () async {
                 if (isCurrent) {
                   playerProvider.togglePlayPause();
                   return;
                 }
-                final provider = context.read<PlaylistProvider>();
+                if (await _playBrowsePlaylist(
+                  context,
+                  playlist,
+                  playerProvider,
+                  provider,
+                )) {
+                  return;
+                }
                 final cachedTracks = await provider.getCachedTracks(
                   playlist.id,
                 );
@@ -713,6 +747,116 @@ class _HomeScreenState extends State<HomeScreen> {
         },
       ),
     );
+  }
+
+  Future<void> _openBrowsePlaylist(
+    BuildContext context,
+    Playlist playlist,
+    PlayerProvider playerProvider,
+    PlaylistProvider playlistProvider,
+  ) async {
+    if (playlist.type == 'album') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AlbumScreen(
+            albumId: playlist.id,
+            title: playlist.title,
+            artist: playlist.author,
+            thumbnailUrl: playlist.thumbnailUrl,
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (playlist.tracks.length > 1) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => PlaylistScreen(playlist: playlist)),
+      );
+      return;
+    }
+
+    final played = await _playBrowsePlaylist(
+      context,
+      playlist,
+      playerProvider,
+      playlistProvider,
+      openPlayer: true,
+    );
+    if (!played && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not find a playable track')),
+      );
+    }
+  }
+
+  Future<bool> _playBrowsePlaylist(
+    BuildContext context,
+    Playlist playlist,
+    PlayerProvider playerProvider,
+    PlaylistProvider playlistProvider, {
+    bool openPlayer = false,
+  }) async {
+    if (playlist.type == 'album') return false;
+
+    final track = playlist.tracks.isNotEmpty
+        ? playlist.tracks.first
+        : await _resolveEmptyPlaylistTrack(playlistProvider, playlist);
+    if (track == null) return false;
+    if (!context.mounted) return false;
+
+    final settings = context.read<SettingsProvider>();
+    playerProvider.setQueue([track], startIndex: 0, playlistId: track.id);
+    await playerProvider.playTrack(track, quality: settings.audioQuality);
+
+    if (openPlayer && context.mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const PlayerScreen()),
+      );
+    }
+    return true;
+  }
+
+  Future<Track?> _resolveEmptyPlaylistTrack(
+    PlaylistProvider provider,
+    Playlist playlist,
+  ) async {
+    Track? track;
+    if (_looksLikeVideoId(playlist.id)) {
+      track = Track(
+        id: playlist.id,
+        title: playlist.title,
+        author: playlist.author,
+        thumbnailUrl: playlist.thumbnailUrl,
+        duration: Duration.zero,
+      );
+    } else {
+      track = await _findChartTrack(
+        provider,
+        ChartItem(
+          id: playlist.id,
+          rank: 1,
+          title: playlist.title,
+          artist: playlist.author ?? '',
+          artworkUrl: playlist.thumbnailUrl,
+          sourceName: 'Saved',
+          sourceUrl: '',
+          kind: ChartItemKind.song,
+        ),
+      );
+    }
+
+    if (track != null) {
+      await provider.saveSingleTrack(track);
+    }
+    return track;
+  }
+
+  bool _looksLikeVideoId(String id) {
+    return RegExp(r'^[a-zA-Z0-9_-]{11}$').hasMatch(id);
   }
 
   Widget _buildChartShelf(
@@ -1105,7 +1249,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
     for (final query in queries) {
       final results = await playlistProvider.searchSilently(query);
-      if (results.isNotEmpty) return results.first;
+      if (results.isNotEmpty) {
+        final ytTrack = results.first;
+        return Track(
+          id: ytTrack.id,
+          title: item.title,
+          author: item.artist,
+          thumbnailUrl: item.artworkUrl ?? ytTrack.thumbnailUrl,
+          duration: ytTrack.duration,
+          albumId: ytTrack.albumId,
+          artistId: ytTrack.artistId,
+          index: ytTrack.index,
+        );
+      }
     }
     return null;
   }
@@ -1150,11 +1306,10 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     final topTracks = tracks.values.take(6).toList();
     final title = switch (_homeTab) {
-      1 => 'Playlist tracks',
-      2 => 'New from YouTube',
-      3 => 'Trending on YouTube',
-      4 => 'Podcasts',
-      5 => 'Favourite tracks',
+      1 => 'New from YouTube',
+      2 => 'Trending on YouTube',
+      3 => 'Podcasts',
+      4 => 'Favourite tracks',
       _ => 'Recent plays',
     };
 
@@ -1708,7 +1863,6 @@ class ChartPendingTile extends StatelessWidget {
   }
 }
 
-
 class _HomeTrackCard extends StatelessWidget {
   final Track track;
   final bool isCurrent;
@@ -1778,6 +1932,103 @@ class _HomeTrackCard extends StatelessWidget {
           const SizedBox(height: 3),
           Text(
             track.author ?? 'YouTube',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.white54,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.8,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ChartItemCard extends StatelessWidget {
+  final ChartItem item;
+  final VoidCallback onTap;
+  final VoidCallback onPlay;
+
+  const _ChartItemCard({
+    required this.item,
+    required this.onTap,
+    required this.onPlay,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Stack(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: SizedBox(
+                  width: 138,
+                  height: 138,
+                  child: Image.network(
+                    item.artworkUrl ?? '',
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => Container(
+                      color: const Color(0xFF252525),
+                      child: Icon(
+                        item.kind == ChartItemKind.album
+                            ? Icons.album_rounded
+                            : Icons.music_note_rounded,
+                        color: Colors.white38,
+                        size: 42,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 8,
+                top: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withAlpha(190),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '#${item.rank}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                right: 8,
+                bottom: 8,
+                child: _MiniAction(
+                  icon: Icons.play_arrow_rounded,
+                  onPressed: onPlay,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            item.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            item.artist,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
